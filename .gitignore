@@ -1,0 +1,21 @@
+/target/
+/template-images/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Runtime-generated artifacts
+/runtime/cache/*
+/runtime/config/*
+/runtime/exports/*
+/runtime/logs/*
+/runtime/saves/*
+
+!/runtime/cache/README.md
+!/runtime/config/README.md
+!/runtime/exports/README.md
+!/runtime/logs/README.md
+!/runtime/saves/README.md

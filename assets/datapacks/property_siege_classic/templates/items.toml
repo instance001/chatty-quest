@@ -1,0 +1,51 @@
+[[items]]
+id = "torch"
+name = "Torch"
+description = "A slightly unreliable flashlight."
+narrator_brief = "Treat the torch as useful but faintly insulting: the kind of tool that helps just enough to remind you how badly things are going."
+tags = ["utility", "starter_item", "weak_weapon"]
+damage = 1
+
+[items.media]
+image = "media/images/items/torch.png"
+audio = "media/audio/items/torch_click.ogg"
+display_role = "item"
+
+[[items]]
+id = "cricket_bat"
+name = "Battered Cricket Bat"
+description = "It is not elegant, but it absolutely counts, and it is the first real answer to anything undead."
+narrator_brief = "Play the bat as a practical suburban weapon with just enough sports nostalgia to make the violence feel impolite."
+tags = ["weapon", "starter_item", "reliable_damage"]
+damage = 3
+
+[items.media]
+image = "media/images/items/cricket_bat.png"
+audio = "media/audio/items/cricket_bat_thunk.ogg"
+display_role = "item"
+
+[[items]]
+id = "medkit"
+name = "Medkit"
+description = "Half crushed, but still very welcome. Using it restores a small chunk of HP."
+narrator_brief = "Treat the medkit like a tiny miracle made of cheap plastic, stale gauze, and lowered standards."
+tags = ["consumable", "healing", "single_use"]
+damage = 0
+
+[items.media]
+image = "media/images/items/medkit.png"
+audio = "media/audio/items/medkit_rustle.ogg"
+display_role = "item"
+
+[[items]]
+id = "house_keys"
+name = "House Keys"
+description = "Still on the same keyring they always lived on. Familiar, grounding, and currently more emotional than useful."
+narrator_brief = "Give the keys a weird emotional weight: ordinary, small, and much more important than they ought to be, even if v0.1 gives them no direct mechanical job."
+tags = ["utility", "keepsake"]
+damage = 0
+
+[items.media]
+image = "media/images/items/house_keys.png"
+audio = "media/audio/items/keys_jingle.ogg"
+display_role = "item"

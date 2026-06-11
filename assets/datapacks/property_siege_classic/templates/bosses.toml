@@ -1,0 +1,13 @@
+[[bosses]]
+id = "brute_in_garage"
+name = "Garage Brute"
+description = "A swollen thing that used to be human and now mostly resembles bad news."
+narrator_brief = "Play the brute as the worst thing on the block: heavy, ugly, and full of the kind of force that makes jokes feel defensive."
+tags = ["zombie", "boss"]
+hp = 8
+damage = 3
+
+[bosses.media]
+image = "media/images/bosses/garage_brute.png"
+audio = "media/audio/bosses/garage_brute_bellow.ogg"
+display_role = "boss"

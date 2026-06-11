@@ -1,0 +1,6 @@
+[[objectives]]
+id = "secure_property"
+name = "Secure The Property"
+description = "Hold the property together long enough to reach the garage and kill the Garage Brute."
+tags = ["primary", "v0_1"]
+target_boss_id = "brute_in_garage"

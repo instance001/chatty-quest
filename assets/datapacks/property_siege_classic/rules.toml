@@ -1,0 +1,6 @@
+scenario_id = "property_siege_classic"
+starting_location = "front_verandah"
+boundary_mode = "scenario_blocked"
+boundary_response = "You make it three fences before the horde eats you, idiot."
+objective_mode = "single_frozen_objective"
+chaos_mode_note = "Chaos only affects narrator looseness and presentation tone; the reducer still owns every lasting state change."

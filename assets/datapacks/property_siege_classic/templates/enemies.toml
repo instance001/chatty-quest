@@ -1,0 +1,27 @@
+[[enemies]]
+id = "shambler_front_gate"
+name = "Front Gate Shambler"
+description = "A corpse with terrible posture and strong opinions about your fence line, positioned to make the front step feel immediately unwelcome."
+narrator_brief = "Play this one as stubborn, lurching, and annoyingly symbolic, like the property itself has sent someone to argue with you physically."
+tags = ["zombie", "melee", "entry_threat"]
+hp = 4
+damage = 2
+
+[enemies.media]
+image = "media/images/enemies/front_gate_shambler.png"
+audio = "media/audio/enemies/front_gate_shambler_groan.ogg"
+display_role = "enemy"
+
+[[enemies]]
+id = "crawler_in_weeds"
+name = "Crawler In The Weeds"
+description = "Too low to the ground and much too eager about ankles, the sort of problem you only notice after it is already under the line of sight."
+narrator_brief = "Treat the crawler as nasty, quick, and indignantly sneaky, like the lawn itself has learned to bite."
+tags = ["zombie", "ambush", "optional_threat"]
+hp = 3
+damage = 1
+
+[enemies.media]
+image = "media/images/enemies/crawler_in_weeds.png"
+audio = "media/audio/enemies/crawler_weeds_hiss.ogg"
+display_role = "enemy"

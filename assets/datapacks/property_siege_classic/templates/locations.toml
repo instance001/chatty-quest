@@ -1,0 +1,79 @@
+[[locations]]
+id = "front_verandah"
+name = "Front Verandah"
+description = "The front entry point of the property, boxed in by bad luck and worse noise."
+narrator_brief = "Play this as the bad threshold of the run: exposed, noisy, and one bad decision away from becoming a memory."
+tags = ["outdoor", "entry", "starting_location"]
+connections = ["kitchen", "garage", "back_garden"]
+items = []
+enemies = ["shambler_front_gate"]
+bosses = []
+
+[locations.media]
+image = "media/images/locations/front_verandah.png"
+audio = "media/audio/ambience/front_verandah_wind.ogg"
+display_role = "location"
+
+[[locations]]
+id = "kitchen"
+name = "Kitchen"
+description = "A cramped kitchen with too many drawers, not enough comfort, and the best chance in the house of finding something useful."
+narrator_brief = "Keep the kitchen tense and domestic at the same time, like a room that still thinks normal life might come back if nobody looks too closely."
+tags = ["indoor", "loot_possible", "healing_route"]
+connections = ["front_verandah", "laundry"]
+items = ["medkit"]
+enemies = []
+bosses = []
+
+[locations.media]
+image = "media/images/locations/kitchen.png"
+audio = "media/audio/ambience/kitchen_hum.ogg"
+display_role = "location"
+
+[[locations]]
+id = "laundry"
+name = "Laundry"
+description = "A narrow little choke point full of plastic baskets, bad tension, and one small reminder that this used to be a home."
+narrator_brief = "Make this room feel cramped, damp, and faintly ridiculous, like a place where panic has to squeeze sideways to fit."
+tags = ["indoor", "utility", "flavor_loot"]
+connections = ["kitchen"]
+items = ["house_keys"]
+enemies = []
+bosses = []
+
+[locations.media]
+image = "media/images/locations/laundry.png"
+audio = "media/audio/ambience/laundry_drip.ogg"
+display_role = "location"
+
+[[locations]]
+id = "garage"
+name = "Garage"
+description = "A concrete cave of tools, stale heat, and one deeply upsetting silhouette waiting to decide whether you deserve the house."
+narrator_brief = "Treat the garage like a boss arena disguised as suburban storage: heavy air, bad shadows, and tool-shaped regrets."
+tags = ["indoor", "boss_space", "objective_target"]
+connections = ["front_verandah"]
+items = []
+enemies = []
+bosses = ["brute_in_garage"]
+
+[locations.media]
+image = "media/images/locations/garage.png"
+audio = "media/audio/ambience/garage_hum.ogg"
+display_role = "location"
+
+[[locations]]
+id = "back_garden"
+name = "Back Garden"
+description = "A rough patch of yard trying very hard to become a graveyard, useful mostly for proving the property can still surprise you from the wrong angle."
+narrator_brief = "Make the back garden feel open but not safe, like bad things have more angles to reach you from."
+tags = ["outdoor", "danger", "optional_threat"]
+connections = ["front_verandah"]
+items = []
+enemies = ["crawler_in_weeds"]
+bosses = []
+
+[locations.media]
+image = "media/images/locations/back_garden.png"
+audio = "media/audio/ambience/back_garden_night.ogg"
+display_role = "location"
