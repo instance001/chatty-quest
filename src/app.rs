@@ -26,11 +26,14 @@ use crate::ui::{
 
 const APP_DISPLAY_NAME: &str = "Chatty Quest";
 const ENGINE_DISPLAY_NAME: &str = "RD Engine";
+const FMI_DISPLAY_NAME: &str = "Fractal Media Infrastructure";
 const SPLASH_PRIMARY_IMAGE_PATH: &str = "assets/ui/branding/chatty-quest-splash-screen.png";
 const SPLASH_ENGINE_IMAGE_PATH: &str = "assets/ui/branding/RD-Engine-logo.png";
+const SPLASH_FMI_IMAGE_PATH: &str = "assets/ui/branding/fmi-splash-wordmark.png";
 const SETUP_HEADER_IMAGE_PATH: &str = "assets/ui/branding/chatty-quest-think-it-play-it.png";
 const SPLASH_PRIMARY_DURATION: Duration = Duration::from_millis(2600);
 const SPLASH_ENGINE_DURATION: Duration = Duration::from_millis(1400);
+const SPLASH_FMI_DURATION: Duration = Duration::from_millis(1400);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AppScreen {
@@ -154,7 +157,7 @@ impl ChattyQuestApp {
 
     fn show_splash_screen(&mut self, ctx: &egui::Context) {
         let elapsed = self.splash.started_at.elapsed();
-        let total_duration = SPLASH_PRIMARY_DURATION + SPLASH_ENGINE_DURATION;
+        let total_duration = SPLASH_PRIMARY_DURATION + SPLASH_ENGINE_DURATION + SPLASH_FMI_DURATION;
 
         if elapsed >= total_duration
             || ctx.input(|input| {
@@ -170,27 +173,39 @@ impl ChattyQuestApp {
 
         ctx.request_repaint_after(Duration::from_millis(16));
 
-        let (title, subtitle, footer, image_path) = if elapsed < SPLASH_PRIMARY_DURATION {
-            (
-                APP_DISPLAY_NAME,
-                "Think it. Play it.",
-                "Press Space, Enter, Esc, or click to skip",
-                asset_if_present(SPLASH_PRIMARY_IMAGE_PATH),
-            )
-        } else {
-            (
-                ENGINE_DISPLAY_NAME,
-                "Radiant Determinism Engine",
-                "Deterministic truth under the hood",
-                asset_if_present(SPLASH_ENGINE_IMAGE_PATH),
-            )
-        };
+        let (title, subtitle, supporting_line, footer, image_path) =
+            if elapsed < SPLASH_PRIMARY_DURATION {
+                (
+                    APP_DISPLAY_NAME,
+                    "Think it. Play it.",
+                    Some("A deterministic chat-forward adventure engine."),
+                    "Press Space, Enter, Esc, or click to skip",
+                    asset_if_present(SPLASH_PRIMARY_IMAGE_PATH),
+                )
+            } else if elapsed < SPLASH_PRIMARY_DURATION + SPLASH_ENGINE_DURATION {
+                (
+                    ENGINE_DISPLAY_NAME,
+                    "Radiant Determinism Engine",
+                    Some("Deterministic truth under the hood."),
+                    "Press Space, Enter, Esc, or click to skip",
+                    asset_if_present(SPLASH_ENGINE_IMAGE_PATH),
+                )
+            } else {
+                (
+                    FMI_DISPLAY_NAME,
+                    "Publisher / steward",
+                    None,
+                    "Press Space, Enter, Esc, or click to continue",
+                    asset_if_present(SPLASH_FMI_IMAGE_PATH),
+                )
+            };
 
         show_splash_screen(
             ctx,
             SplashScreenModel {
                 title,
                 subtitle,
+                supporting_line,
                 footer,
                 image_path,
                 progress: (elapsed.as_secs_f32() / total_duration.as_secs_f32()).clamp(0.0, 1.0),

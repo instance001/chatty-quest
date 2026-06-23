@@ -76,6 +76,7 @@ pub struct SetupScreenModel<'a> {
 pub struct SplashScreenModel<'a> {
     pub title: &'a str,
     pub subtitle: &'a str,
+    pub supporting_line: Option<&'a str>,
     pub footer: &'a str,
     pub image_path: Option<&'a str>,
     pub progress: f32,
@@ -256,6 +257,32 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
 
                     ui.small("Tabs stay hidden until a run exists, keeping setup uncluttered.");
                 });
+
+                ui.add_space(12.0);
+
+                ui.group(|ui| {
+                    ui.heading("Project Identity");
+                    ui.small("Compact stewardship surface for the tool.");
+                    ui.add_space(4.0);
+
+                    egui::CollapsingHeader::new("About Fractal Media Infrastructure")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.small("Publisher / steward: Fractal Media Infrastructure");
+                            ui.small("GitHub: instance001");
+                            ui.small("License: GNU Affero General Public License v3.0");
+                            ui.small("FMI is a small independent R&D umbrella for open-source AI tooling, cognitive scaffolding experiments, and local-first research systems.");
+                            ui.add_space(6.0);
+                            ui.hyperlink_to(
+                                "Repository: instance001/chatty-quest",
+                                "https://github.com/instance001/chatty-quest",
+                            );
+                            ui.hyperlink_to(
+                                "Publisher GitHub: instance001",
+                                "https://github.com/instance001",
+                            );
+                        });
+                });
             });
         });
 
@@ -290,8 +317,10 @@ pub fn show_splash_screen(ctx: &egui::Context, model: SplashScreenModel<'_>) {
                         .size(18.0)
                         .color(egui::Color32::from_rgb(161, 188, 148)),
                 );
-                ui.add_space(6.0);
-                ui.small("A deterministic chat-forward adventure engine.");
+                if let Some(supporting_line) = model.supporting_line {
+                    ui.add_space(6.0);
+                    ui.small(supporting_line);
+                }
                 ui.add_space(18.0);
 
                 egui::Frame::new()
