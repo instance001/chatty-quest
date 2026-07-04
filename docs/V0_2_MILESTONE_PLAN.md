@@ -184,3 +184,5 @@ Why this is the best starter:
 Current implementation anchor:
 
 - [docs/V0_2_LOCKED_PROGRESSION_SPEC.md](docs/V0_2_LOCKED_PROGRESSION_SPEC.md)
+- [docs/V0_2_OBJECTIVE_CONDITIONS_SPEC.md](docs/V0_2_OBJECTIVE_CONDITIONS_SPEC.md)
+- [docs/V0_2_LOCATION_OBJECTIVE_SPEC.md](docs/V0_2_LOCATION_OBJECTIVE_SPEC.md)

@@ -2,9 +2,10 @@ use crate::data::datapacks::DatapackBundle;
 
 use super::actions::{ActionOutcome, EncounterKind, GameAction, GameEvent, ItemUseEffect};
 use super::queries::{
-    describe_current_location, equipped_damage, find_boss, find_boss_by_name_or_id, find_enemy,
-    find_enemy_by_name_or_id, find_item, find_item_by_name_or_id, find_location,
-    find_location_by_name_or_id, is_location_locked, matches_name,
+    describe_current_location, describe_location, equipped_damage, find_boss,
+    find_boss_by_name_or_id, find_enemy, find_enemy_by_name_or_id, find_item,
+    find_item_by_name_or_id, find_location, find_location_by_name_or_id, is_location_locked,
+    matches_name, unlock_targets_for_item,
 };
 use super::state::{InventoryEntry, RunState};
 
@@ -14,11 +15,12 @@ pub fn apply_action(
     action: GameAction,
 ) -> ActionOutcome {
     let was_alive = state.hp > 0;
+    let objective_before = objective_condition_statuses(state);
     let mut outcome = match action {
         GameAction::Help => ActionOutcome {
             events: vec![GameEvent::HelpShown],
             lines: vec![
-                "Commands: help, look, go <location>, inspect <thing>, take <item>, equip <item>, use <item>, attack, wait."
+                "Commands: help, look, go <location>, unlock <location>, inspect <thing>, take <item>, equip <item>, use <item>, attack, wait."
                     .to_owned(),
             ],
         },
@@ -29,6 +31,7 @@ pub fn apply_action(
             lines: describe_current_location(state, bundle),
         },
         GameAction::Move { destination } => handle_move(state, bundle, &destination),
+        GameAction::Unlock { target } => handle_unlock(state, bundle, &target),
         GameAction::Inspect { target } => handle_inspect(state, bundle, &target),
         GameAction::Take { item_name } => handle_take(state, bundle, &item_name),
         GameAction::Equip { item_name } => handle_equip(state, &item_name),
@@ -36,6 +39,12 @@ pub fn apply_action(
         GameAction::Attack => handle_attack(state, bundle),
         GameAction::Wait => handle_wait(state, bundle),
     };
+
+    let objective_after = objective_condition_statuses(state);
+    outcome.lines.extend(objective_progress_lines(
+        &objective_before,
+        &objective_after,
+    ));
 
     if update_objective_completion(state) {
         outcome.events.push(GameEvent::ObjectiveCompleted {
@@ -153,16 +162,21 @@ fn handle_inspect(state: &RunState, bundle: &DatapackBundle, target: &str) -> Ac
             events: vec![GameEvent::Inspected {
                 target: location.id.clone(),
             }],
-            lines: vec![format!("{}: {}", location.name, location.description)],
+            lines: describe_location(state, bundle, location),
         };
     }
 
     if let Some(item) = find_item_by_name_or_id(bundle, target) {
+        let unlock_targets = unlock_targets_for_item(bundle, &item.id);
+        let mut lines = vec![format!("{}: {}", item.name, item.description)];
+        if !unlock_targets.is_empty() {
+            lines.push(format!("Can unlock: {}.", unlock_targets.join(", ")));
+        }
         return ActionOutcome {
             events: vec![GameEvent::Inspected {
                 target: item.id.clone(),
             }],
-            lines: vec![format!("{}: {}", item.name, item.description)],
+            lines,
         };
     }
 
@@ -295,48 +309,12 @@ fn handle_use(state: &mut RunState, bundle: &DatapackBundle, item_name: &str) ->
         };
     };
 
-    if item.id == "house_keys" {
-        let Some(garage) = find_location(bundle, "garage") else {
-            return ActionOutcome {
-                events: vec![GameEvent::ActionRejected {
-                    reason: "The garage location could not be resolved.".to_owned(),
-                }],
-                lines: vec!["The garage location could not be resolved.".to_owned()],
-            };
-        };
+    if let Some(outcome) = try_unlock_with_item(state, bundle, &item.id, None) {
+        return outcome;
+    }
 
-        if !state.locked_locations.contains(&garage.id) {
-            return ActionOutcome {
-                events: vec![GameEvent::ActionRejected {
-                    reason: "The garage is already unlocked.".to_owned(),
-                }],
-                lines: vec!["The garage is already unlocked.".to_owned()],
-            };
-        }
-
-        if state.current_location_id != "front_verandah" {
-            return ActionOutcome {
-                events: vec![GameEvent::ActionRejected {
-                    reason: "These keys do not help here.".to_owned(),
-                }],
-                lines: vec!["These keys do not help here.".to_owned()],
-            };
-        }
-
-        state.locked_locations.remove(&garage.id);
-        return ActionOutcome {
-            events: vec![
-                GameEvent::ItemUsed {
-                    item_id: item.id.clone(),
-                    effect: ItemUseEffect::NoEffect,
-                },
-                GameEvent::LocationUnlocked {
-                    location_id: garage.id.clone(),
-                    item_id: item.id.clone(),
-                },
-            ],
-            lines: vec!["You unlock the garage.".to_owned()],
-        };
+    if template.utility_effect.as_deref() == Some("reveal_connections") {
+        return reveal_connected_locations(state, bundle, &item);
     }
 
     if template.tags.iter().any(|tag| tag == "healing") {
@@ -369,6 +347,206 @@ fn handle_use(state: &mut RunState, bundle: &DatapackBundle, item_name: &str) ->
         lines: vec![format!(
             "You fumble with the {}, but it has no usable v0.1 effect.",
             item.name
+        )],
+    }
+}
+
+fn reveal_connected_locations(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    item: &InventoryEntry,
+) -> ActionOutcome {
+    let Some(current_location) = find_location(bundle, &state.current_location_id) else {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "Current location could not be resolved.".to_owned(),
+            }],
+            lines: vec!["Current location could not be resolved.".to_owned()],
+        };
+    };
+
+    let mut newly_known = Vec::new();
+    for connection_id in &current_location.connections {
+        if state.known_locations.insert(connection_id.clone()) {
+            let location_name = find_location(bundle, connection_id)
+                .map(|location| location.name.clone())
+                .unwrap_or_else(|| connection_id.clone());
+            newly_known.push(location_name);
+        }
+    }
+
+    let mut lines = if newly_known.is_empty() {
+        vec!["The torch does not reveal anything new from here.".to_owned()]
+    } else {
+        vec![
+            "You sweep the torch across the exits and get a better read on the nearby routes."
+                .to_owned(),
+            format!("Newly known routes: {}.", newly_known.join(", ")),
+        ]
+    };
+
+    ActionOutcome {
+        events: vec![GameEvent::ItemUsed {
+            item_id: item.id.clone(),
+            effect: ItemUseEffect::RevealedLocations {
+                count: newly_known.len(),
+            },
+        }],
+        lines: {
+            if newly_known.is_empty() {
+                lines
+            } else {
+                lines.push(format!("You use the {}.", item.name));
+                lines
+            }
+        },
+    }
+}
+
+fn handle_unlock(state: &mut RunState, bundle: &DatapackBundle, target: &str) -> ActionOutcome {
+    let Some(location) = find_location_by_name_or_id(bundle, target) else {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "That location is not part of this scenario.".to_owned(),
+            }],
+            lines: vec!["That location is not part of this scenario.".to_owned()],
+        };
+    };
+
+    let Some(unlock_item_id) = location.unlock_item_id.as_deref() else {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "That location has no gate to unlock.".to_owned(),
+            }],
+            lines: vec!["That location has no gate to unlock.".to_owned()],
+        };
+    };
+
+    if !state.inventory.iter().any(|item| item.id == unlock_item_id) {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: format!("You need {} to unlock {}.", unlock_item_id, location.name),
+            }],
+            lines: vec![format!(
+                "You need {} to unlock {}.",
+                unlock_item_id, location.name
+            )],
+        };
+    }
+
+    try_unlock_with_item(state, bundle, unlock_item_id, Some(&location.id)).unwrap_or(
+        ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "You cannot reach that gate from here.".to_owned(),
+            }],
+            lines: vec!["You cannot reach that gate from here.".to_owned()],
+        },
+    )
+}
+
+fn try_unlock_with_item(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    item_id: &str,
+    target_location_id: Option<&str>,
+) -> Option<ActionOutcome> {
+    let current_location = find_location(bundle, &state.current_location_id)?;
+
+    let reachable_locked_locations = bundle
+        .locations
+        .iter()
+        .filter(|location| location.locked)
+        .filter(|location| state.locked_locations.contains(&location.id))
+        .filter(|location| {
+            location.id == current_location.id
+                || current_location
+                    .connections
+                    .iter()
+                    .any(|connection| connection == &location.id)
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(target_location_id) = target_location_id {
+        let target = reachable_locked_locations
+            .iter()
+            .find(|location| location.id == target_location_id)?;
+        if target.unlock_item_id.as_deref() != Some(item_id) {
+            return Some(ActionOutcome {
+                events: vec![GameEvent::ActionRejected {
+                    reason: format!("{} does not unlock {}.", item_id, target.name),
+                }],
+                lines: vec![format!("{} does not unlock {}.", item_id, target.name)],
+            });
+        }
+        return Some(unlock_location(state, target, item_id));
+    }
+
+    let matching_locations = reachable_locked_locations
+        .into_iter()
+        .filter(|location| location.unlock_item_id.as_deref() == Some(item_id))
+        .collect::<Vec<_>>();
+
+    if matching_locations.len() > 1 {
+        let names = matching_locations
+            .iter()
+            .map(|location| location.name.clone())
+            .collect::<Vec<_>>();
+        return Some(ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: format!(
+                    "More than one gate matches this item here: {}.",
+                    names.join(", ")
+                ),
+            }],
+            lines: vec![format!(
+                "More than one gate matches this item here: {}. Use unlock <location>.",
+                names.join(", ")
+            )],
+        });
+    }
+
+    if let Some(target) = matching_locations.into_iter().next() {
+        return Some(unlock_location(state, target, item_id));
+    }
+
+    let has_any_matching_gate = bundle
+        .locations
+        .iter()
+        .any(|location| location.unlock_item_id.as_deref() == Some(item_id));
+
+    if has_any_matching_gate {
+        return Some(ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "That unlock item does not help here.".to_owned(),
+            }],
+            lines: vec!["That unlock item does not help here.".to_owned()],
+        });
+    }
+
+    None
+}
+
+fn unlock_location(
+    state: &mut RunState,
+    location: &crate::data::datapacks::LocationTemplate,
+    item_id: &str,
+) -> ActionOutcome {
+    state.locked_locations.remove(&location.id);
+    ActionOutcome {
+        events: vec![
+            GameEvent::ItemUsed {
+                item_id: item_id.to_owned(),
+                effect: ItemUseEffect::NoEffect,
+            },
+            GameEvent::LocationUnlocked {
+                location_id: location.id.clone(),
+                item_id: item_id.to_owned(),
+            },
+        ],
+        lines: vec![format!(
+            "You unlock {} with {}.",
+            location.name,
+            item_id.replace('_', " ")
         )],
     }
 }
@@ -497,12 +675,92 @@ fn handle_wait(state: &RunState, bundle: &DatapackBundle) -> ActionOutcome {
 }
 
 fn update_objective_completion(state: &mut RunState) -> bool {
-    let completed_now = state
-        .bosses_defeated
-        .contains(&state.active_objective.target_boss_id);
+    let boss_condition_met = state
+        .active_objective
+        .target_boss_id
+        .as_ref()
+        .is_none_or(|boss_id| state.bosses_defeated.contains(boss_id));
+    let item_condition_met = state
+        .active_objective
+        .required_item_id
+        .as_ref()
+        .is_none_or(|item_id| state.inventory.iter().any(|item| &item.id == item_id));
+    let location_condition_met = state
+        .active_objective
+        .required_location_id
+        .as_ref()
+        .is_none_or(|location_id| &state.current_location_id == location_id);
+    let has_any_condition = state.active_objective.target_boss_id.is_some()
+        || state.active_objective.required_item_id.is_some()
+        || state.active_objective.required_location_id.is_some();
+    let completed_now =
+        has_any_condition && boss_condition_met && item_condition_met && location_condition_met;
     let just_completed = completed_now && !state.active_objective.completed;
     state.active_objective.completed = completed_now;
     just_completed
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct ObjectiveConditionStatus {
+    label: String,
+    met: bool,
+}
+
+fn objective_condition_statuses(state: &RunState) -> Vec<ObjectiveConditionStatus> {
+    let mut statuses = Vec::new();
+
+    if let Some(required_item_id) = &state.active_objective.required_item_id {
+        statuses.push(ObjectiveConditionStatus {
+            label: format!("Hold item '{}'", required_item_id),
+            met: state
+                .inventory
+                .iter()
+                .any(|item| &item.id == required_item_id),
+        });
+    }
+
+    if let Some(target_boss_id) = &state.active_objective.target_boss_id {
+        statuses.push(ObjectiveConditionStatus {
+            label: format!("Defeat boss '{}'", target_boss_id),
+            met: state.bosses_defeated.contains(target_boss_id),
+        });
+    }
+
+    if let Some(required_location_id) = &state.active_objective.required_location_id {
+        statuses.push(ObjectiveConditionStatus {
+            label: format!("Reach location '{}'", required_location_id),
+            met: state.current_location_id == *required_location_id,
+        });
+    }
+
+    statuses
+}
+
+fn objective_progress_lines(
+    before: &[ObjectiveConditionStatus],
+    after: &[ObjectiveConditionStatus],
+) -> Vec<String> {
+    after
+        .iter()
+        .filter_map(|after_status| {
+            let before_status = before
+                .iter()
+                .find(|status| status.label == after_status.label)?;
+            if before_status.met == after_status.met {
+                return None;
+            }
+
+            Some(format!(
+                "Objective progress: {} is now {}.",
+                after_status.label,
+                if after_status.met {
+                    "complete"
+                } else {
+                    "incomplete"
+                }
+            ))
+        })
+        .collect()
 }
 
 fn rolling_summary_lines(events: &[GameEvent], fallback_lines: &[String]) -> Vec<String> {
@@ -552,6 +810,10 @@ fn summarize_event(event: &GameEvent) -> Option<String> {
             ItemUseEffect::Healing { amount } => Some(format!(
                 "Used item '{}' for healing {} HP.",
                 item_id, amount
+            )),
+            ItemUseEffect::RevealedLocations { count } => Some(format!(
+                "Used item '{}' to reveal {} connected location(s).",
+                item_id, count
             )),
             ItemUseEffect::NoEffect => Some(format!("Used item '{}' with no effect.", item_id)),
         },
@@ -648,6 +910,12 @@ mod tests {
             take_outcome.events.first(),
             Some(GameEvent::ItemTaken { item_id }) if item_id == "medkit"
         ));
+        assert!(
+            !take_outcome
+                .lines
+                .iter()
+                .any(|line| line.starts_with("Objective progress:"))
+        );
 
         let equip_outcome = apply_action(
             &mut state,
@@ -682,6 +950,57 @@ mod tests {
     }
 
     #[test]
+    fn torch_reveals_connected_locations_and_then_stabilizes() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        assert_eq!(state.known_locations.len(), 1);
+
+        let first_use = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Use {
+                item_name: "torch".to_owned(),
+            },
+        );
+
+        assert!(state.known_locations.contains("kitchen"));
+        assert!(state.known_locations.contains("garage"));
+        assert!(state.known_locations.contains("back_garden"));
+        assert!(matches!(
+            first_use.events.first(),
+            Some(GameEvent::ItemUsed {
+                item_id,
+                effect: ItemUseEffect::RevealedLocations { count: 3 }
+            }) if item_id == "torch"
+        ));
+        assert!(first_use.lines.iter().any(|line| {
+            line == "You sweep the torch across the exits and get a better read on the nearby routes."
+        }));
+
+        let second_use = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Use {
+                item_name: "torch".to_owned(),
+            },
+        );
+
+        assert!(matches!(
+            second_use.events.first(),
+            Some(GameEvent::ItemUsed {
+                item_id,
+                effect: ItemUseEffect::RevealedLocations { count: 0 }
+            }) if item_id == "torch"
+        ));
+        assert_eq!(
+            second_use.lines.first().map(String::as_str),
+            Some("The torch does not reveal anything new from here.")
+        );
+    }
+
+    #[test]
     fn locked_garage_requires_house_keys_and_unlocks_cleanly() {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
@@ -699,6 +1018,17 @@ mod tests {
         assert_eq!(
             blocked_move.lines.first().map(String::as_str),
             Some("The garage door is locked. You need the house keys.")
+        );
+        let blocked_back_garden = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "back_garden".to_owned(),
+            },
+        );
+        assert_eq!(
+            blocked_back_garden.lines.first().map(String::as_str),
+            Some("The back gate is chained shut. You need the house keys.")
         );
 
         apply_action(
@@ -732,7 +1062,7 @@ mod tests {
         );
         assert_eq!(
             wrong_context.lines.first().map(String::as_str),
-            Some("These keys do not help here.")
+            Some("That unlock item does not help here.")
         );
         assert!(state.locked_locations.contains("garage"));
 
@@ -751,11 +1081,27 @@ mod tests {
             },
         );
 
-        let unlock_outcome = apply_action(
+        let ambiguous_unlock = apply_action(
             &mut state,
             &bundle,
             GameAction::Use {
                 item_name: "house_keys".to_owned(),
+            },
+        );
+        assert_eq!(
+            ambiguous_unlock.lines.first().map(String::as_str),
+            Some(
+                "More than one gate matches this item here: Garage, Back Garden. Use unlock <location>."
+            )
+        );
+        assert!(state.locked_locations.contains("garage"));
+        assert!(state.locked_locations.contains("back_garden"));
+
+        let unlock_outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Unlock {
+                target: "garage".to_owned(),
             },
         );
         assert!(!state.locked_locations.contains("garage"));
@@ -768,7 +1114,7 @@ mod tests {
         )));
         assert_eq!(
             unlock_outcome.lines.first().map(String::as_str),
-            Some("You unlock the garage.")
+            Some("You unlock Garage with house keys.")
         );
 
         let moved = apply_action(
@@ -783,6 +1129,190 @@ mod tests {
             moved.events.first(),
             Some(GameEvent::Moved { to_location_id, .. }) if to_location_id == "garage"
         ));
+    }
+
+    #[test]
+    fn unlock_command_alias_unlocks_reachable_gate() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "laundry".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Take {
+                item_name: "house_keys".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "front_verandah".to_owned(),
+            },
+        );
+
+        let unlock_outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Unlock {
+                target: "garage".to_owned(),
+            },
+        );
+
+        assert!(!state.locked_locations.contains("garage"));
+        assert!(unlock_outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::LocationUnlocked { location_id, .. } if location_id == "garage"
+        )));
+    }
+
+    #[test]
+    fn explicit_unlock_command_can_target_second_gate() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "laundry".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Take {
+                item_name: "house_keys".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "front_verandah".to_owned(),
+            },
+        );
+
+        let unlock_outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Unlock {
+                target: "back_garden".to_owned(),
+            },
+        );
+
+        assert!(!state.locked_locations.contains("back_garden"));
+        assert!(state.locked_locations.contains("garage"));
+        assert!(unlock_outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::LocationUnlocked { location_id, .. } if location_id == "back_garden"
+        )));
+    }
+
+    #[test]
+    fn inspect_location_surfaces_gate_state_and_item_unlock_targets() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        let garage_inspect = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Inspect {
+                target: "garage".to_owned(),
+            },
+        );
+        assert!(
+            garage_inspect
+                .lines
+                .iter()
+                .any(|line| line.contains("Gate state: Locked"))
+        );
+        assert!(
+            garage_inspect
+                .lines
+                .iter()
+                .any(|line| line.contains("unlock item: house_keys"))
+        );
+        let back_garden_inspect = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Inspect {
+                target: "back_garden".to_owned(),
+            },
+        );
+        assert!(
+            back_garden_inspect
+                .lines
+                .iter()
+                .any(|line| line.contains("Gate state: Locked"))
+        );
+
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "laundry".to_owned(),
+            },
+        );
+
+        let key_inspect = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Inspect {
+                target: "house_keys".to_owned(),
+            },
+        );
+        assert!(
+            key_inspect
+                .lines
+                .iter()
+                .any(|line| line.contains("Can unlock: Garage, Back Garden."))
+        );
     }
 
     #[test]
@@ -819,6 +1349,7 @@ mod tests {
                 item_name: "house_keys".to_owned(),
             },
         );
+        assert!(!state.active_objective.completed);
         apply_action(
             &mut state,
             &bundle,
@@ -836,8 +1367,8 @@ mod tests {
         apply_action(
             &mut state,
             &bundle,
-            GameAction::Use {
-                item_name: "house_keys".to_owned(),
+            GameAction::Unlock {
+                target: "garage".to_owned(),
             },
         );
         apply_action(
@@ -887,6 +1418,160 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, GameEvent::RunWon))
         );
+        assert!(final_outcome.lines.iter().any(|line| {
+            line == "Objective progress: Defeat boss 'brute_in_garage' is now complete."
+        }));
         assert!(final_outcome.lines.iter().any(|line| line == "You win."));
+    }
+
+    #[test]
+    fn item_only_objective_completes_when_required_item_is_taken() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.active_objective.target_boss_id = None;
+        state.active_objective.required_item_id = Some("house_keys".to_owned());
+        state.active_objective.required_location_id = None;
+        state.active_objective.completed = false;
+
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "laundry".to_owned(),
+            },
+        );
+
+        let outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Take {
+                item_name: "house_keys".to_owned(),
+            },
+        );
+
+        assert!(state.active_objective.completed);
+        assert!(
+            outcome.lines.iter().any(|line| {
+                line == "Objective progress: Hold item 'house_keys' is now complete."
+            })
+        );
+        assert!(
+            outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, GameEvent::ObjectiveCompleted { .. }))
+        );
+        assert!(outcome.lines.iter().any(|line| line == "You win."));
+    }
+
+    #[test]
+    fn location_only_objective_completes_when_required_location_is_reached() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.active_objective.target_boss_id = None;
+        state.active_objective.required_item_id = None;
+        state.active_objective.required_location_id = Some("kitchen".to_owned());
+        state.active_objective.completed = false;
+
+        let outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+
+        assert!(state.active_objective.completed);
+        assert!(outcome.lines.iter().any(|line| {
+            line == "Objective progress: Reach location 'kitchen' is now complete."
+        }));
+        assert!(
+            outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, GameEvent::ObjectiveCompleted { .. }))
+        );
+    }
+
+    #[test]
+    fn combined_objective_requires_location_in_addition_to_other_conditions() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "laundry".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Take {
+                item_name: "house_keys".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "front_verandah".to_owned(),
+            },
+        );
+        apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Unlock {
+                target: "garage".to_owned(),
+            },
+        );
+
+        state.active_objective.target_boss_id = None;
+        state.active_objective.required_item_id = Some("house_keys".to_owned());
+        state.active_objective.required_location_id = Some("garage".to_owned());
+        state.active_objective.completed = false;
+
+        let before_entering = apply_action(&mut state, &bundle, GameAction::Look);
+        assert!(!state.active_objective.completed);
+        assert!(!before_entering.lines.iter().any(|line| line == "You win."));
+
+        let outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "garage".to_owned(),
+            },
+        );
+
+        assert!(state.active_objective.completed);
+        assert!(outcome.lines.iter().any(|line| {
+            line == "Objective progress: Reach location 'garage' is now complete."
+        }));
+        assert!(outcome.lines.iter().any(|line| line == "You win."));
     }
 }

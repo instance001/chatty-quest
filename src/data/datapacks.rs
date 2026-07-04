@@ -131,6 +131,8 @@ pub struct ItemTemplate {
     pub media: MediaReferences,
     #[serde(default)]
     pub damage: i32,
+    #[serde(default)]
+    pub utility_effect: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -165,7 +167,9 @@ pub struct ObjectiveTemplate {
     pub name: String,
     pub description: String,
     pub tags: Vec<String>,
-    pub target_boss_id: String,
+    pub target_boss_id: Option<String>,
+    pub required_item_id: Option<String>,
+    pub required_location_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -365,6 +369,21 @@ fn load_datapack_bundle_from_path(
     if let Some(items) = &items {
         validate_unique_ids("items", &items.items, &mut errors);
         validate_non_blank_names("items", &items.items, &mut errors);
+        for item in &items.items {
+            if let Some(utility_effect) = item.utility_effect.as_deref() {
+                match utility_effect.trim() {
+                    "reveal_connections" => {}
+                    "" => errors.push(format!(
+                        "Item '{}' must not define a blank utility_effect.",
+                        item.id
+                    )),
+                    other => errors.push(format!(
+                        "Item '{}' defines unknown utility_effect '{}'.",
+                        item.id, other
+                    )),
+                }
+            }
+        }
     }
     if let Some(enemies) = &enemies {
         validate_unique_ids("enemies", &enemies.enemies, &mut errors);
@@ -475,22 +494,87 @@ fn load_datapack_bundle_from_path(
         }
     }
 
-    if let (Some(objectives), Some(bosses)) = (&objectives, &bosses) {
+    if let (Some(objectives), Some(items), Some(bosses), Some(locations)) =
+        (&objectives, &items, &bosses, &locations)
+    {
+        let known_items: HashSet<&str> =
+            items.items.iter().map(|entry| entry.id.as_str()).collect();
         let known_bosses: HashSet<&str> = bosses
             .bosses
             .iter()
             .map(|entry| entry.id.as_str())
             .collect();
+        let known_locations: HashSet<&str> = locations
+            .locations
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
         for objective in &objectives.objectives {
-            if objective.target_boss_id.trim().is_empty() {
+            let target_boss_id = objective
+                .target_boss_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let required_item_id = objective
+                .required_item_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let required_location_id = objective
+                .required_location_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+
+            if target_boss_id.is_none() && objective.target_boss_id.is_some() {
                 errors.push(format!(
-                    "Objective '{}' must define a target_boss_id.",
+                    "Objective '{}' must not define a blank target_boss_id.",
                     objective.id
                 ));
-            } else if !known_bosses.contains(objective.target_boss_id.as_str()) {
+            }
+            if required_item_id.is_none() && objective.required_item_id.is_some() {
+                errors.push(format!(
+                    "Objective '{}' must not define a blank required_item_id.",
+                    objective.id
+                ));
+            }
+            if required_location_id.is_none() && objective.required_location_id.is_some() {
+                errors.push(format!(
+                    "Objective '{}' must not define a blank required_location_id.",
+                    objective.id
+                ));
+            }
+            if target_boss_id.is_none()
+                && required_item_id.is_none()
+                && required_location_id.is_none()
+            {
+                errors.push(format!(
+                    "Objective '{}' must define at least one completion condition field.",
+                    objective.id
+                ));
+            }
+            if let Some(target_boss_id) = target_boss_id
+                && !known_bosses.contains(target_boss_id)
+            {
                 errors.push(format!(
                     "Objective '{}' references unknown target boss '{}'.",
-                    objective.id, objective.target_boss_id
+                    objective.id, target_boss_id
+                ));
+            }
+            if let Some(required_item_id) = required_item_id
+                && !known_items.contains(required_item_id)
+            {
+                errors.push(format!(
+                    "Objective '{}' references unknown required item '{}'.",
+                    objective.id, required_item_id
+                ));
+            }
+            if let Some(required_location_id) = required_location_id
+                && !known_locations.contains(required_location_id)
+            {
+                errors.push(format!(
+                    "Objective '{}' references unknown required location '{}'.",
+                    objective.id, required_location_id
                 ));
             }
         }
@@ -746,7 +830,114 @@ fn read_optional_text_preview(path: &Path, errors: &mut Vec<String>) -> Option<S
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_datapacks, load_datapack_bundle_by_folder};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        discover_datapacks, load_datapack_bundle_by_folder, load_datapack_bundle_from_path,
+    };
+
+    struct TempDatapackDir {
+        path: PathBuf,
+    }
+
+    impl TempDatapackDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("chatty_quest_{}_{}", name, unique));
+            fs::create_dir_all(path.join("templates")).expect("expected templates dir");
+            Self { path }
+        }
+
+        fn write_file(&self, relative_path: &str, content: &str) {
+            let path = self.path.join(relative_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("expected parent dir");
+            }
+            fs::write(path, content).expect("expected file write");
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDatapackDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_minimal_test_datapack(dir: &TempDatapackDir, objectives_toml: &str) {
+        dir.write_file(
+            "pack.toml",
+            r#"id = "test_pack"
+display_name = "Test Pack"
+version = "0.0.1"
+author = "tests"
+description = "temp pack"
+primary_scenario = "test_pack"
+"#,
+        );
+        dir.write_file(
+            "rules.toml",
+            r#"scenario_id = "test_pack"
+starting_location = "start"
+boundary_mode = "hard"
+boundary_response = "no"
+objective_mode = "single"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+tags = ["start"]
+connections = []
+items = []
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+        dir.write_file(
+            "templates/items.toml",
+            r#"[[items]]
+id = "real_key"
+name = "Real Key"
+description = "A real key."
+tags = ["utility"]
+"#,
+        );
+        dir.write_file(
+            "templates/enemies.toml",
+            r#"[[enemies]]
+id = "test_enemy"
+name = "Test Enemy"
+description = "An enemy."
+tags = ["melee"]
+hp = 1
+damage = 1
+"#,
+        );
+        dir.write_file(
+            "templates/bosses.toml",
+            r#"[[bosses]]
+id = "test_boss"
+name = "Test Boss"
+description = "A boss."
+tags = ["boss"]
+hp = 1
+damage = 1
+"#,
+        );
+        dir.write_file("templates/objectives.toml", objectives_toml);
+    }
 
     #[test]
     fn property_siege_classic_is_discoverable_from_assets() {
@@ -779,13 +970,32 @@ mod tests {
                 .any(|location| location.id == "garage")
         );
         assert!(bundle.items.iter().any(|item| item.id == "cricket_bat"));
+        assert_eq!(
+            bundle
+                .items
+                .iter()
+                .find(|item| item.id == "torch")
+                .and_then(|item| item.utility_effect.as_deref()),
+            Some("reveal_connections")
+        );
         assert!(
             bundle
                 .bosses
                 .iter()
                 .any(|boss| boss.id == "brute_in_garage")
         );
-        assert_eq!(bundle.objectives[0].target_boss_id, "brute_in_garage");
+        assert_eq!(
+            bundle.objectives[0].target_boss_id.as_deref(),
+            Some("brute_in_garage")
+        );
+        assert_eq!(
+            bundle.objectives[0].required_item_id.as_deref(),
+            Some("house_keys")
+        );
+        assert_eq!(
+            bundle.objectives[0].required_location_id.as_deref(),
+            Some("garage")
+        );
         let garage = bundle
             .locations
             .iter()
@@ -793,5 +1003,115 @@ mod tests {
             .expect("expected garage template");
         assert!(garage.locked);
         assert_eq!(garage.unlock_item_id.as_deref(), Some("house_keys"));
+        let back_garden = bundle
+            .locations
+            .iter()
+            .find(|location| location.id == "back_garden")
+            .expect("expected back garden template");
+        assert!(back_garden.locked);
+        assert_eq!(back_garden.unlock_item_id.as_deref(), Some("house_keys"));
+    }
+
+    #[test]
+    fn objective_validation_rejects_missing_completion_fields() {
+        let dir = TempDatapackDir::new("objective_missing_conditions");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Test Objective"
+description = "No conditions."
+tags = ["test"]
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("must define at least one completion condition field")
+        }));
+    }
+
+    #[test]
+    fn objective_validation_rejects_unknown_required_item_id() {
+        let dir = TempDatapackDir::new("objective_unknown_item");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Test Objective"
+description = "Bad required item."
+tags = ["test"]
+required_item_id = "missing_key"
+target_boss_id = "test_boss"
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("references unknown required item 'missing_key'") })
+        );
+    }
+
+    #[test]
+    fn objective_validation_rejects_unknown_required_location_id() {
+        let dir = TempDatapackDir::new("objective_unknown_location");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Test Objective"
+description = "Bad required location."
+tags = ["test"]
+required_location_id = "missing_room"
+target_boss_id = "test_boss"
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("references unknown required location 'missing_room'")
+        }));
+    }
+
+    #[test]
+    fn item_validation_rejects_unknown_utility_effect() {
+        let dir = TempDatapackDir::new("item_unknown_utility");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Test Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/items.toml",
+            r#"[[items]]
+id = "real_key"
+name = "Real Key"
+description = "A real key."
+tags = ["utility"]
+utility_effect = "unknown_effect"
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("defines unknown utility_effect 'unknown_effect'") })
+        );
     }
 }

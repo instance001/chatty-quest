@@ -60,12 +60,14 @@ Pass if:
 
 Action:
 
+- from `Front Verandah`, use the `Torch`
 - move from `Front Verandah` to `Kitchen`
 - try `go garage` from `Front Verandah` before unlocking it
 - try one invalid move by typing `go laundry` from `Front Verandah` before moving, or another obviously disconnected destination from your current room
 
 Check:
 
+- using the torch reveals connected routes without moving the player
 - valid movement updates the current location in the map panel
 - the chat log reflects the move
 - locked movement is rejected with the garage-lock response
@@ -84,7 +86,8 @@ Action:
 - continue to `Laundry`
 - take the `House Keys`
 - return to `Front Verandah`
-- use `house_keys`
+- verify `use house_keys` now asks for explicit targeting when more than one gate matches
+- run `unlock garage`
 - open the `Inventory` tab
 - equip the `Battered Cricket Bat`
 - use the `Medkit` after taking damage later, or manually verify it is present and usable first
@@ -94,7 +97,9 @@ Check:
 - the medkit disappears from the room after pickup
 - the medkit appears in inventory
 - the house keys appear in inventory
-- using the house keys at `Front Verandah` unlocks the garage
+- the torch remains usable and can report when no new nearby routes are left to reveal
+- `use house_keys` does not guess when both `Garage` and `Back Garden` are valid nearby gates
+- `unlock garage` unlocks only the garage
 - equipped state visibly updates for the cricket bat
 - using the medkit removes it from inventory and updates HP
 
@@ -126,6 +131,7 @@ Pass if:
 Action:
 
 - fight the `Front Gate Shambler` and/or `Crawler In The Weeds`
+- optionally unlock the `Back Garden` and verify it opens as a second valid key gate
 - unlock the `Garage`
 - reach the `Garage`
 - kill the `Garage Brute`
@@ -133,7 +139,11 @@ Action:
 Check:
 
 - the garage is visibly locked before unlock
-- the garage becomes visibly unlocked after using the keys
+- the back garden is visibly locked before optional unlock
+- the garage becomes visibly unlocked after `unlock garage`
+- the objective condition lines show `house_keys` held before the boss dies
+- torch-driven reveal behavior never invents movement or objective progress by itself
+- objective progress lines surface when `house_keys` is acquired and when the boss condition completes
 - attack updates the log and HP
 - enemy/boss threat state updates in the UI
 - the objective remains visible before completion
@@ -176,7 +186,7 @@ Check:
 - location restores correctly
 - HP restores correctly
 - inventory restores correctly
-- locked/unlocked garage state restores correctly
+- locked/unlocked gate state restores correctly for the garage and any other changed gate
 - objective state restores correctly
 - the app returns to a coherent playable shell rather than a half-loaded state
 

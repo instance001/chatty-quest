@@ -32,6 +32,7 @@ pub struct CharacterSummaryModel {
     pub objective_complete: bool,
     pub active_objective_id: String,
     pub active_objective_description: String,
+    pub objective_condition_rows: Vec<String>,
     pub enemies_defeated: usize,
     pub bosses_defeated: usize,
     pub locked_locations: Vec<String>,
@@ -342,6 +343,7 @@ pub fn build_character_summary(
         objective_complete: run.active_objective.completed,
         active_objective_id: run.active_objective.id.clone(),
         active_objective_description: run.active_objective.description.clone(),
+        objective_condition_rows: build_objective_condition_rows(run),
         enemies_defeated: run.enemies_defeated.len(),
         bosses_defeated: run.bosses_defeated.len(),
         locked_locations: {
@@ -565,7 +567,7 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
         };
 
     let run_health_rows = report.run_health.as_ref().map_or_else(Vec::new, |run| {
-        vec![
+        let mut rows = vec![
             format!("Location: {}", run.location_id),
             format!("HP: {} / {}", run.hp, run.max_hp),
             format!(
@@ -586,7 +588,9 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
                     run.locked_locations.join(", ")
                 }
             ),
-        ]
+        ];
+        rows.extend(run.objective_condition_rows.iter().cloned());
+        rows
     });
 
     let environment_rows = report
@@ -927,7 +931,7 @@ pub fn build_map_layout(bundle: &DatapackBundle, run: &RunState) -> GeneratedMap
                 has_objective_target: location
                     .bosses
                     .iter()
-                    .any(|boss_id| boss_id == &run.active_objective.target_boss_id),
+                    .any(|boss_id| run.active_objective.target_boss_id.as_ref() == Some(boss_id)),
                 is_connected_to_current: bundle
                     .locations
                     .iter()
@@ -1430,4 +1434,44 @@ fn tile_visibility_under_fog(
             }
         }
     }
+}
+
+fn build_objective_condition_rows(run: &RunState) -> Vec<String> {
+    let mut rows = Vec::new();
+
+    if let Some(required_item_id) = &run.active_objective.required_item_id {
+        let held = run
+            .inventory
+            .iter()
+            .any(|item| &item.id == required_item_id);
+        rows.push(format!(
+            "Requires item '{}': {}",
+            required_item_id,
+            if held { "held" } else { "missing" }
+        ));
+    }
+
+    if let Some(target_boss_id) = &run.active_objective.target_boss_id {
+        let defeated = run.bosses_defeated.contains(target_boss_id);
+        rows.push(format!(
+            "Requires boss '{}': {}",
+            target_boss_id,
+            if defeated { "defeated" } else { "alive" }
+        ));
+    }
+
+    if let Some(required_location_id) = &run.active_objective.required_location_id {
+        let at_location = run.current_location_id == *required_location_id;
+        rows.push(format!(
+            "Requires location '{}': {}",
+            required_location_id,
+            if at_location {
+                "reached"
+            } else {
+                "not reached"
+            }
+        ));
+    }
+
+    rows
 }

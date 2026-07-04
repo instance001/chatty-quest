@@ -5,6 +5,7 @@ description = "A slightly unreliable flashlight."
 narrator_brief = "Treat the torch as useful but faintly insulting: the kind of tool that helps just enough to remind you how badly things are going."
 tags = ["utility", "starter_item", "weak_weapon"]
 damage = 1
+utility_effect = "reveal_connections"
 
 [items.media]
 image = "media/images/items/torch.png"

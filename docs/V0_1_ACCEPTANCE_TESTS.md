@@ -71,6 +71,7 @@ The following should work:
 
 - the current location is visible
 - the map panel renders scenario-relevant location information
+- deterministic knowledge-reveal item effects can expand visible known-route state without moving the player
 - movement options or connected locations are represented clearly enough to support play
 - the player's current location updates after valid movement
 
@@ -124,7 +125,8 @@ The following should work:
 
 - item pickup changes deterministic state
 - item use changes deterministic state when legal
-- utility items can unlock deterministic progression gates when used in the correct context
+- utility items can unlock deterministic progression gates through explicit location-targeted commands when more than one valid gate exists
+- utility items can also reveal deterministic knowledge state when their template defines a supported effect
 - equip changes deterministic state when legal
 - consumed or destroyed items no longer appear as untouched inventory
 
@@ -150,6 +152,8 @@ Combat produces trustworthy mechanical outcomes even if the first model is inten
 The following should work:
 
 - the active objective is visible
+- the active objective condition rows show boss and item truth when present
+- objective progress lines surface when a tracked condition changes state
 - objective-related state progresses when the required conditions are met
 - objective completion is driven by structured state rather than narrator prose
 - win or loss is surfaced clearly in UI state as well as narration
@@ -177,7 +181,7 @@ The following should work:
 
 - saving writes a JSON save file
 - loading restores the run state accurately
-- restored state includes player location, inventory, HP, objective progress, and lock-state truth
+- restored state includes player location, inventory, HP, objective progress, objective condition truth, and lock-state truth
 - loading a save returns the user to a coherent playable state
 
 Pass condition:

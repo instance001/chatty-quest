@@ -71,6 +71,7 @@ pub struct RunHealthReport {
     pub hp: i32,
     pub max_hp: i32,
     pub objective_complete: bool,
+    pub objective_condition_rows: Vec<String>,
     pub inventory_items: usize,
     pub known_locations: usize,
     pub live_enemies: usize,
@@ -242,6 +243,7 @@ pub fn build_diagnostic_report(
         hp: run.hp,
         max_hp: run.max_hp,
         objective_complete: run.active_objective.completed,
+        objective_condition_rows: build_objective_condition_rows(run),
         inventory_items: run.inventory.len(),
         known_locations: run.known_locations.len(),
         live_enemies: run.enemies_alive.len(),
@@ -536,6 +538,12 @@ fn format_game_event(event: &GameEvent) -> String {
             ItemUseEffect::Healing { amount } => {
                 format!("ItemUsed(item_id={}, effect=Healing({}))", item_id, amount)
             }
+            ItemUseEffect::RevealedLocations { count } => {
+                format!(
+                    "ItemUsed(item_id={}, effect=RevealedLocations({}))",
+                    item_id, count
+                )
+            }
             ItemUseEffect::NoEffect => {
                 format!("ItemUsed(item_id={}, effect=NoEffect)", item_id)
             }
@@ -564,6 +572,52 @@ fn format_game_event(event: &GameEvent) -> String {
         GameEvent::RunWon => "RunWon".to_owned(),
         GameEvent::RunLost => "RunLost".to_owned(),
     }
+}
+
+fn build_objective_condition_rows(run: &RunState) -> Vec<String> {
+    let mut rows = Vec::new();
+
+    if let Some(required_item_id) = &run.active_objective.required_item_id {
+        rows.push(format!(
+            "Objective item '{}': {}",
+            required_item_id,
+            if run
+                .inventory
+                .iter()
+                .any(|item| &item.id == required_item_id)
+            {
+                "held"
+            } else {
+                "missing"
+            }
+        ));
+    }
+
+    if let Some(target_boss_id) = &run.active_objective.target_boss_id {
+        rows.push(format!(
+            "Objective boss '{}': {}",
+            target_boss_id,
+            if run.bosses_defeated.contains(target_boss_id) {
+                "defeated"
+            } else {
+                "alive"
+            }
+        ));
+    }
+
+    if let Some(required_location_id) = &run.active_objective.required_location_id {
+        rows.push(format!(
+            "Objective location '{}': {}",
+            required_location_id,
+            if run.current_location_id == *required_location_id {
+                "reached"
+            } else {
+                "not reached"
+            }
+        ));
+    }
+
+    rows
 }
 
 #[cfg(test)]
@@ -617,6 +671,12 @@ mod tests {
                 .map(|health| health.location_id.as_str()),
             Some("front_verandah")
         );
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health
+                .objective_condition_rows
+                .iter()
+                .any(|row| row.contains("house_keys"))
+        }));
         assert_eq!(report.event_counters.moves, 1);
         assert_eq!(report.event_counters.items_taken, 1);
         assert!(

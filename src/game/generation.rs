@@ -26,6 +26,8 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         name: active_objective_template.name.clone(),
         description: active_objective_template.description.clone(),
         target_boss_id: active_objective_template.target_boss_id.clone(),
+        required_item_id: active_objective_template.required_item_id.clone(),
+        required_location_id: active_objective_template.required_location_id.clone(),
         completed: false,
     };
 
@@ -159,7 +161,18 @@ mod tests {
         assert_eq!(state.current_location_id, bundle.rules.starting_location);
         assert!(state.known_locations.contains("front_verandah"));
         assert!(state.visited_locations.contains("front_verandah"));
-        assert_eq!(state.active_objective.target_boss_id, "brute_in_garage");
+        assert_eq!(
+            state.active_objective.target_boss_id.as_deref(),
+            Some("brute_in_garage")
+        );
+        assert_eq!(
+            state.active_objective.required_item_id.as_deref(),
+            Some("house_keys")
+        );
+        assert_eq!(
+            state.active_objective.required_location_id.as_deref(),
+            Some("garage")
+        );
         assert!(!state.active_objective.completed);
         assert_eq!(state.hp, 10);
         assert_eq!(state.max_hp, 10);
@@ -184,5 +197,6 @@ mod tests {
             vec!["brute_in_garage".to_owned()]
         );
         assert!(state.locked_locations.contains("garage"));
+        assert!(state.locked_locations.contains("back_garden"));
     }
 }

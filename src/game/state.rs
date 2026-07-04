@@ -41,6 +41,8 @@ pub struct ObjectiveState {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub target_boss_id: String,
+    pub target_boss_id: Option<String>,
+    pub required_item_id: Option<String>,
+    pub required_location_id: Option<String>,
     pub completed: bool,
 }

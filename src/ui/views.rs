@@ -799,6 +799,9 @@ pub fn show_character_tab(
             ));
             ui.label(format!("Active objective id: {}", summary.active_objective_id));
             ui.small(&summary.active_objective_description);
+            for row in &summary.objective_condition_rows {
+                ui.small(row);
+            }
             ui.small(format!(
                 "Enemies defeated: {} | Bosses defeated: {}",
                 summary.enemies_defeated, summary.bosses_defeated

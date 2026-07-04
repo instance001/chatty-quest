@@ -18,8 +18,8 @@ Meaning:
 
 Automated evidence:
 
-- `cargo test` passes with `15` passing tests
-- tests cover datapack discovery, run generation, locked progression, reducer behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
+- `cargo test` passes with `24` passing tests
+- tests cover datapack discovery, multi-gate locked progression, utility-effect item behavior, objective-condition feedback, reducer behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
 
 ## Acceptance Grid
 
@@ -65,7 +65,7 @@ Evidence:
 
 - map panel, location display, and movement surfaces exist in [src/ui/views.rs](/C:/Users/User/Desktop/chatty-quest/src/ui/views.rs:320)
 - map layout generation and tile state are wired through derived UI models
-- reducer tests verify valid movement, invalid movement, and lock-gated movement state changes
+- reducer tests verify valid movement, invalid movement, lock-gated movement state changes, and torch-driven route reveal
 
 Manual confirmation:
 
@@ -102,7 +102,7 @@ Status: `pass`
 Evidence:
 
 - reducer movement logic and scenario boundary block behavior live in [src/game/reducer.rs](/C:/Users/User/Desktop/chatty-quest/src/game/reducer.rs:58)
-- tests verify connected movement succeeds and invalid movement returns the scenario boundary response
+- tests verify connected movement succeeds, lock-gated movement blocks cleanly, and invalid movement returns the scenario boundary response
 
 ### Item Interaction
 
@@ -111,7 +111,7 @@ Status: `pass`
 Evidence:
 
 - take, equip, and use logic live in [src/game/reducer.rs](/C:/Users/User/Desktop/chatty-quest/src/game/reducer.rs:157)
-- tests verify pickup removes world item state, equip updates equipped item state, medkit use heals and consumes the item, and `house_keys` unlock the garage only in the correct context
+- tests verify pickup removes world item state, equip updates equipped item state, medkit use heals and consumes the item, explicit unlock commands target the correct gate when multiple locks share one key item, and torch use reveals deterministic connected-route knowledge
 
 ### Combat
 
@@ -130,7 +130,8 @@ Evidence:
 
 - objective state is frozen into `RunState`
 - reducer completion logic lives in [src/game/reducer.rs](/C:/Users/User/Desktop/chatty-quest/src/game/reducer.rs:431)
-- tests verify boss defeat completes the objective and surfaces `You win.`
+- mixed-condition objective checks now require both item and boss truth when configured
+- tests verify item-only completion, mixed boss-plus-item completion, objective progress-line surfacing, and `You win.` surfacing
 
 ### Media Focus
 
@@ -149,7 +150,7 @@ Status: `pass`
 Evidence:
 
 - save/load runtime path lives in [src/runtime/mod.rs](/C:/Users/User/Desktop/chatty-quest/src/runtime/mod.rs:7)
-- tests verify roundtrip preservation of location, HP, inventory length, equipped item, objective state, and locked progression state
+- tests verify roundtrip preservation of location, HP, inventory length, equipped item, objective condition state, and locked gate state
 - app save/load shell wiring lives in [src/app.rs](/C:/Users/User/Desktop/chatty-quest/src/app.rs:430)
 
 ### Validation Errors

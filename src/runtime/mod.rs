@@ -135,6 +135,30 @@ mod tests {
         assert_eq!(restored.run_state.current_location_id, "garage");
         assert_eq!(restored.run_state.hp, 7);
         assert!(restored.run_state.active_objective.completed);
+        assert_eq!(
+            restored
+                .run_state
+                .active_objective
+                .target_boss_id
+                .as_deref(),
+            Some("brute_in_garage")
+        );
+        assert_eq!(
+            restored
+                .run_state
+                .active_objective
+                .required_item_id
+                .as_deref(),
+            Some("house_keys")
+        );
+        assert_eq!(
+            restored
+                .run_state
+                .active_objective
+                .required_location_id
+                .as_deref(),
+            Some("garage")
+        );
         assert!(!restored.run_state.locked_locations.contains("garage"));
         assert_eq!(restored.run_state.inventory.len(), run.inventory.len());
         assert_eq!(restored.run_state.equipped_item_id, run.equipped_item_id);

@@ -5,6 +5,7 @@ pub enum GameAction {
     Help,
     Look,
     Move { destination: String },
+    Unlock { target: String },
     Inspect { target: String },
     Take { item_name: String },
     Equip { item_name: String },
@@ -23,6 +24,7 @@ pub enum EncounterKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ItemUseEffect {
     Healing { amount: i32 },
+    RevealedLocations { count: usize },
     NoEffect,
 }
 
@@ -116,6 +118,14 @@ pub fn parse_action(input: &str) -> Result<GameAction, String> {
             destination: rest.trim().to_owned(),
         });
     }
+    if let Some(rest) = lower
+        .strip_prefix("unlock ")
+        .or_else(|| lower.strip_prefix("open "))
+    {
+        return Ok(GameAction::Unlock {
+            target: rest.trim().to_owned(),
+        });
+    }
     if let Some(rest) = lower.strip_prefix("inspect ") {
         return Ok(GameAction::Inspect {
             target: rest.trim().to_owned(),
@@ -137,5 +147,22 @@ pub fn parse_action(input: &str) -> Result<GameAction, String> {
         });
     }
 
-    Err("I only understand a narrow set of commands right now. Try: help, look, go ..., inspect ..., take ..., equip ..., use ..., attack, wait.".to_owned())
+    Err("I only understand a narrow set of commands right now. Try: help, look, go ..., unlock ..., inspect ..., take ..., equip ..., use ..., attack, wait.".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GameAction, parse_action};
+
+    #[test]
+    fn parse_action_supports_unlock_aliases() {
+        assert!(matches!(
+            parse_action("unlock garage"),
+            Ok(GameAction::Unlock { target }) if target == "garage"
+        ));
+        assert!(matches!(
+            parse_action("open garage"),
+            Ok(GameAction::Unlock { target }) if target == "garage"
+        ));
+    }
 }

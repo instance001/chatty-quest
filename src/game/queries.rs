@@ -9,7 +9,28 @@ pub fn describe_current_location(state: &RunState, bundle: &DatapackBundle) -> V
         return vec!["Current location could not be resolved.".to_owned()];
     };
 
+    describe_location(state, bundle, location)
+}
+
+pub fn describe_location(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    location: &LocationTemplate,
+) -> Vec<String> {
     let mut lines = vec![format!("{}: {}", location.name, location.description)];
+
+    if location.locked {
+        let lock_state = if state.locked_locations.contains(&location.id) {
+            "Locked"
+        } else {
+            "Unlocked"
+        };
+        let mut lock_line = format!("Gate state: {}", lock_state);
+        if let Some(unlock_item_id) = location.unlock_item_id.as_deref() {
+            lock_line.push_str(&format!(" | unlock item: {}", unlock_item_id));
+        }
+        lines.push(format!("{}.", lock_line));
+    }
 
     if !location.connections.is_empty() {
         let exits = location
@@ -67,6 +88,15 @@ pub fn describe_current_location(state: &RunState, bundle: &DatapackBundle) -> V
     }
 
     lines
+}
+
+pub fn unlock_targets_for_item(bundle: &DatapackBundle, item_id: &str) -> Vec<String> {
+    bundle
+        .locations
+        .iter()
+        .filter(|location| location.unlock_item_id.as_deref() == Some(item_id))
+        .map(|location| location.name.clone())
+        .collect()
 }
 
 pub fn find_location<'a>(bundle: &'a DatapackBundle, id: &str) -> Option<&'a LocationTemplate> {
