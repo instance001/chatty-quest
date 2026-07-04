@@ -43,6 +43,10 @@ pub enum GameEvent {
     MovementBlocked {
         attempted_destination: String,
     },
+    LocationUnlocked {
+        location_id: String,
+        item_id: String,
+    },
     Inspected {
         target: String,
     },

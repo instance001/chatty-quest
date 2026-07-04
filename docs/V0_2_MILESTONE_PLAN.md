@@ -180,3 +180,7 @@ Why this is the best starter:
 4. Update `Property Siege Classic` so `house_keys` matter mechanically
 5. Surface the gate in UI and diagnostics
 6. Add tests for locked movement, unlocking, persistence, and objective flow
+
+Current implementation anchor:
+
+- [docs/V0_2_LOCKED_PROGRESSION_SPEC.md](docs/V0_2_LOCKED_PROGRESSION_SPEC.md)

@@ -107,6 +107,12 @@ pub struct LocationTemplate {
     #[serde(default)]
     pub connections: Vec<String>,
     #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub unlock_item_id: Option<String>,
+    #[serde(default)]
+    pub locked_response: Option<String>,
+    #[serde(default)]
     pub items: Vec<String>,
     #[serde(default)]
     pub enemies: Vec<String>,
@@ -402,6 +408,26 @@ fn load_datapack_bundle_from_path(
         let known_items: HashSet<&str> =
             items.items.iter().map(|entry| entry.id.as_str()).collect();
         for location in &locations.locations {
+            if location.locked {
+                let Some(unlock_item_id) = location
+                    .unlock_item_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    errors.push(format!(
+                        "Locked location '{}' must define unlock_item_id.",
+                        location.id
+                    ));
+                    continue;
+                };
+                if !known_items.contains(unlock_item_id) {
+                    errors.push(format!(
+                        "Location '{}' references unknown unlock_item_id '{}'.",
+                        location.id, unlock_item_id
+                    ));
+                }
+            }
             for item_id in &location.items {
                 if !known_items.contains(item_id.as_str()) {
                     errors.push(format!(
@@ -760,5 +786,12 @@ mod tests {
                 .any(|boss| boss.id == "brute_in_garage")
         );
         assert_eq!(bundle.objectives[0].target_boss_id, "brute_in_garage");
+        let garage = bundle
+            .locations
+            .iter()
+            .find(|location| location.id == "garage")
+            .expect("expected garage template");
+        assert!(garage.locked);
+        assert_eq!(garage.unlock_item_id.as_deref(), Some("house_keys"));
     }
 }

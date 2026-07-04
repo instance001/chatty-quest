@@ -34,6 +34,7 @@ pub struct CharacterSummaryModel {
     pub active_objective_description: String,
     pub enemies_defeated: usize,
     pub bosses_defeated: usize,
+    pub locked_locations: Vec<String>,
     pub rolling_summary: Vec<String>,
     pub pack_folder: Option<String>,
     pub objective_tags: Option<String>,
@@ -52,6 +53,7 @@ pub struct CharacterActionModel {
 pub struct ExitRowModel {
     pub destination_id: String,
     pub destination_name: String,
+    pub locked: bool,
 }
 
 #[derive(Clone)]
@@ -65,6 +67,7 @@ pub struct LocalItemActionRowModel {
 pub struct KnownLocationRowModel {
     pub location_name: String,
     pub marker: String,
+    pub locked: bool,
 }
 
 #[derive(Clone)]
@@ -213,6 +216,7 @@ pub struct MapExitButtonModel {
     pub direction_label: String,
     pub destination_id: String,
     pub destination_name: String,
+    pub locked: bool,
 }
 
 #[derive(Clone)]
@@ -228,6 +232,7 @@ pub struct MapTileDisplayModel {
     pub show_loot_badge: bool,
     pub show_threat_badge: bool,
     pub show_objective_badge: bool,
+    pub show_locked_badge: bool,
     pub show_move_button: bool,
     pub show_advance_button: bool,
 }
@@ -339,6 +344,11 @@ pub fn build_character_summary(
         active_objective_description: run.active_objective.description.clone(),
         enemies_defeated: run.enemies_defeated.len(),
         bosses_defeated: run.bosses_defeated.len(),
+        locked_locations: {
+            let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
+            locked.sort();
+            locked
+        },
         rolling_summary: run.rolling_summary.clone(),
         pack_folder: bundle.map(|bundle| bundle.folder_name.clone()),
         objective_tags,
@@ -381,6 +391,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
                 .map(|destination| ExitRowModel {
                     destination_id: destination.id.clone(),
                     destination_name: destination.name.clone(),
+                    locked: run.locked_locations.contains(&destination.id),
                 })
         })
         .collect();
@@ -411,6 +422,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
             KnownLocationRowModel {
                 location_name: location.name.clone(),
                 marker: marker.to_owned(),
+                locked: run.locked_locations.contains(&location.id),
             }
         })
         .collect();
@@ -565,6 +577,14 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
             format!(
                 "Live threats: {} enemies | {} bosses",
                 run.live_enemies, run.live_bosses
+            ),
+            format!(
+                "Locked locations: {}",
+                if run.locked_locations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    run.locked_locations.join(", ")
+                }
             ),
         ]
     });
@@ -773,6 +793,10 @@ pub fn build_map_legend() -> MapLegendModel {
             MapLegendBadgeModel {
                 label: "Objective".to_owned(),
                 description: "objective target here".to_owned(),
+            },
+            MapLegendBadgeModel {
+                label: "Locked".to_owned(),
+                description: "gated progression".to_owned(),
             },
         ],
         marker_rows: vec![
@@ -1097,6 +1121,7 @@ pub fn build_map_exit_buttons(
             direction_label: exit_direction_label(current_tile, tile).to_owned(),
             destination_id: tile.location_id.clone(),
             destination_name: tile.name.clone(),
+            locked: run.locked_locations.contains(&tile.location_id),
         })
         .collect::<Vec<_>>();
 
@@ -1156,6 +1181,7 @@ pub fn build_map_tile_display(
         show_loot_badge: is_fully_visible && tile.has_items,
         show_threat_badge: is_fully_visible && tile.has_live_threats,
         show_objective_badge: is_fully_visible && tile.has_objective_target,
+        show_locked_badge: is_fully_visible && run.locked_locations.contains(&tile.location_id),
         show_move_button: is_adjacent_exit,
         show_advance_button: matches!(visibility, MapTileVisibilityModel::Hinted),
     }
@@ -1187,6 +1213,9 @@ pub fn build_map_tile_hover(
         }
         if tile.has_objective_target {
             detail_rows.push("Objective target present".to_owned());
+        }
+        if display.show_locked_badge {
+            detail_rows.push("Locked".to_owned());
         }
     }
 

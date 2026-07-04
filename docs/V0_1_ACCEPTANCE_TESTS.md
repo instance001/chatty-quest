@@ -109,6 +109,7 @@ The player can inspect core mechanical state without relying on prose alone.
 The following should work:
 
 - valid movement between connected locations succeeds
+- locked progression gates block movement until their deterministic prerequisite is satisfied
 - invalid movement is rejected
 - scenario boundaries prevent leaving the allowed playable space
 - boundary behavior is scenario-driven rather than hidden engine law
@@ -123,6 +124,7 @@ The following should work:
 
 - item pickup changes deterministic state
 - item use changes deterministic state when legal
+- utility items can unlock deterministic progression gates when used in the correct context
 - equip changes deterministic state when legal
 - consumed or destroyed items no longer appear as untouched inventory
 
@@ -175,7 +177,7 @@ The following should work:
 
 - saving writes a JSON save file
 - loading restores the run state accurately
-- restored state includes player location, inventory, HP, and objective progress
+- restored state includes player location, inventory, HP, objective progress, and lock-state truth
 - loading a save returns the user to a coherent playable state
 
 Pass condition:

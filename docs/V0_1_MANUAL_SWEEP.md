@@ -61,12 +61,14 @@ Pass if:
 Action:
 
 - move from `Front Verandah` to `Kitchen`
+- try `go garage` from `Front Verandah` before unlocking it
 - try one invalid move by typing `go laundry` from `Front Verandah` before moving, or another obviously disconnected destination from your current room
 
 Check:
 
 - valid movement updates the current location in the map panel
 - the chat log reflects the move
+- locked movement is rejected with the garage-lock response
 - invalid movement is rejected with the boundary response
 - connected exits update truthfully after movement
 
@@ -79,6 +81,10 @@ Pass if:
 Action:
 
 - in `Kitchen`, take the `Medkit`
+- continue to `Laundry`
+- take the `House Keys`
+- return to `Front Verandah`
+- use `house_keys`
 - open the `Inventory` tab
 - equip the `Battered Cricket Bat`
 - use the `Medkit` after taking damage later, or manually verify it is present and usable first
@@ -87,6 +93,8 @@ Check:
 
 - the medkit disappears from the room after pickup
 - the medkit appears in inventory
+- the house keys appear in inventory
+- using the house keys at `Front Verandah` unlocks the garage
 - equipped state visibly updates for the cricket bat
 - using the medkit removes it from inventory and updates HP
 
@@ -118,11 +126,14 @@ Pass if:
 Action:
 
 - fight the `Front Gate Shambler` and/or `Crawler In The Weeds`
+- unlock the `Garage`
 - reach the `Garage`
 - kill the `Garage Brute`
 
 Check:
 
+- the garage is visibly locked before unlock
+- the garage becomes visibly unlocked after using the keys
 - attack updates the log and HP
 - enemy/boss threat state updates in the UI
 - the objective remains visible before completion
@@ -165,6 +176,7 @@ Check:
 - location restores correctly
 - HP restores correctly
 - inventory restores correctly
+- locked/unlocked garage state restores correctly
 - objective state restores correctly
 - the app returns to a coherent playable shell rather than a half-loaded state
 
@@ -182,6 +194,7 @@ Check:
 
 - the panel renders cleanly
 - application/content/run/environment sections are readable
+- lock-state truth is visible and understandable
 - missing media warnings are understandable rather than cryptic
 - recent events and counters make sense relative to what you just did
 

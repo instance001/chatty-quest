@@ -276,6 +276,7 @@ fn select_media_focus(
             GameEvent::HelpShown
             | GameEvent::ActionRejected { .. }
             | GameEvent::MovementBlocked { .. }
+            | GameEvent::LocationUnlocked { .. }
             | GameEvent::DamageTaken { .. }
             | GameEvent::AttackWhiff
             | GameEvent::ObjectiveCompleted { .. }
@@ -411,6 +412,18 @@ fn build_active_cues(
                     ),
                 });
             }
+            GameEvent::LocationUnlocked {
+                location_id,
+                item_id,
+            } => {
+                cues.push(MediaCue {
+                    label: "Gate unlocked".to_owned(),
+                    detail: format!(
+                        "Location '{}' was unlocked with '{}'. A future media hook could surface a mechanical progression beat here.",
+                        location_id, item_id
+                    ),
+                });
+            }
             GameEvent::ObjectiveCompleted { objective_id } => {
                 cues.push(MediaCue {
                     label: "Objective complete".to_owned(),
@@ -523,6 +536,13 @@ fn build_future_hook_keys(
             }
             GameEvent::DamageTaken { .. } => keys.push("event:player_damaged".to_owned()),
             GameEvent::MovementBlocked { .. } => keys.push("event:boundary_blocked".to_owned()),
+            GameEvent::LocationUnlocked {
+                location_id,
+                item_id,
+            } => {
+                keys.push(format!("event:location_unlocked:{}", location_id));
+                keys.push(format!("event:item_unlock:{}", item_id));
+            }
             GameEvent::ObjectiveCompleted { objective_id } => {
                 keys.push(format!("event:objective_complete:{}", objective_id))
             }

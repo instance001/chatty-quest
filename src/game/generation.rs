@@ -70,6 +70,12 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         .iter()
         .map(|location| (location.id.clone(), location.bosses.clone()))
         .collect::<HashMap<_, _>>();
+    let locked_locations = bundle
+        .locations
+        .iter()
+        .filter(|location| location.locked)
+        .map(|location| location.id.clone())
+        .collect::<HashSet<_>>();
 
     let location_name = bundle
         .locations
@@ -109,6 +115,7 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         location_items,
         location_enemies,
         location_bosses,
+        locked_locations,
         boundary_response: bundle.rules.boundary_response.clone(),
         rolling_summary: vec![format!(
             "Run started for scenario '{}'.",
@@ -176,5 +183,6 @@ mod tests {
                 .unwrap_or_default(),
             vec!["brute_in_garage".to_owned()]
         );
+        assert!(state.locked_locations.contains("garage"));
     }
 }

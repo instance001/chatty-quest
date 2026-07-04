@@ -109,6 +109,7 @@ mod tests {
         run.current_location_id = "garage".to_owned();
         run.hp = 7;
         run.active_objective.completed = true;
+        run.locked_locations.remove("garage");
 
         let payload = SavePayload {
             save_version: current_save_version(),
@@ -134,6 +135,7 @@ mod tests {
         assert_eq!(restored.run_state.current_location_id, "garage");
         assert_eq!(restored.run_state.hp, 7);
         assert!(restored.run_state.active_objective.completed);
+        assert!(!restored.run_state.locked_locations.contains("garage"));
         assert_eq!(restored.run_state.inventory.len(), run.inventory.len());
         assert_eq!(restored.run_state.equipped_item_id, run.equipped_item_id);
     }

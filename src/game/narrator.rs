@@ -108,6 +108,7 @@ impl MockNarrator {
             GameEvent::HelpShown
             | GameEvent::ActionRejected { .. }
             | GameEvent::MovementBlocked { .. }
+            | GameEvent::LocationUnlocked { .. }
             | GameEvent::DamageTaken { .. }
             | GameEvent::AttackWhiff
             | GameEvent::ObjectiveCompleted { .. }

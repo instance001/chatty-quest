@@ -469,7 +469,11 @@ pub fn show_game_tab(
                             ui.label("Connected exits");
                             for exit in &sidebar.connected_exits {
                                 if ui
-                                    .button(format!("Go to {}", exit.destination_name))
+                                    .button(format!(
+                                        "Go to {}{}",
+                                        exit.destination_name,
+                                        if exit.locked { " [locked]" } else { "" }
+                                    ))
                                     .clicked()
                                 {
                                     queued_command = Some(format!("go {}", exit.destination_id));
@@ -496,7 +500,12 @@ pub fn show_game_tab(
                     ui.label("Known locations");
                     if let Some(sidebar) = build_game_sidebar(run, bundle) {
                         for location in &sidebar.known_locations {
-                            ui.small(format!("{} {}", location.marker, location.location_name));
+                            ui.small(format!(
+                                "{} {}{}",
+                                location.marker,
+                                location.location_name,
+                                if location.locked { " [locked]" } else { "" }
+                            ));
                         }
                     }
                 }
@@ -793,6 +802,14 @@ pub fn show_character_tab(
             ui.small(format!(
                 "Enemies defeated: {} | Bosses defeated: {}",
                 summary.enemies_defeated, summary.bosses_defeated
+            ));
+            ui.small(format!(
+                "Locked locations: {}",
+                if summary.locked_locations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    summary.locked_locations.join(", ")
+                }
             ));
             if !summary.rolling_summary.is_empty() {
                 ui.separator();
@@ -1250,6 +1267,9 @@ fn render_map_tile(
                     if display.show_objective_badge {
                         badge_chip(ui, "Objective", egui::Color32::from_rgb(241, 202, 104));
                     }
+                    if display.show_locked_badge {
+                        badge_chip(ui, "Locked", egui::Color32::from_rgb(196, 156, 98));
+                    }
                 });
 
                 if display.show_move_button && ui.small_button("Move").clicked() {
@@ -1285,8 +1305,10 @@ fn show_current_exit_strip(
             for exit in exits {
                 if ui
                     .small_button(format!(
-                        "{} {}",
-                        exit.direction_label, exit.destination_name
+                        "{} {}{}",
+                        exit.direction_label,
+                        exit.destination_name,
+                        if exit.locked { " [locked]" } else { "" }
                     ))
                     .clicked()
                 {

@@ -23,6 +23,7 @@ pub struct RunState {
     pub location_items: HashMap<String, Vec<String>>,
     pub location_enemies: HashMap<String, Vec<String>>,
     pub location_bosses: HashMap<String, Vec<String>>,
+    pub locked_locations: HashSet<String>,
     pub boundary_response: Option<String>,
     pub rolling_summary: Vec<String>,
 }

@@ -18,8 +18,8 @@ Meaning:
 
 Automated evidence:
 
-- `cargo test` passes with `14` passing tests
-- tests cover datapack discovery, run generation, reducer behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
+- `cargo test` passes with `15` passing tests
+- tests cover datapack discovery, run generation, locked progression, reducer behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
 
 ## Acceptance Grid
 
@@ -65,7 +65,7 @@ Evidence:
 
 - map panel, location display, and movement surfaces exist in [src/ui/views.rs](/C:/Users/User/Desktop/chatty-quest/src/ui/views.rs:320)
 - map layout generation and tile state are wired through derived UI models
-- reducer tests verify valid and invalid movement state changes
+- reducer tests verify valid movement, invalid movement, and lock-gated movement state changes
 
 Manual confirmation:
 
@@ -111,7 +111,7 @@ Status: `pass`
 Evidence:
 
 - take, equip, and use logic live in [src/game/reducer.rs](/C:/Users/User/Desktop/chatty-quest/src/game/reducer.rs:157)
-- tests verify pickup removes world item state, equip updates equipped item state, and medkit use heals and consumes the item
+- tests verify pickup removes world item state, equip updates equipped item state, medkit use heals and consumes the item, and `house_keys` unlock the garage only in the correct context
 
 ### Combat
 
@@ -149,7 +149,7 @@ Status: `pass`
 Evidence:
 
 - save/load runtime path lives in [src/runtime/mod.rs](/C:/Users/User/Desktop/chatty-quest/src/runtime/mod.rs:7)
-- tests verify roundtrip preservation of location, HP, inventory length, equipped item, and objective state
+- tests verify roundtrip preservation of location, HP, inventory length, equipped item, objective state, and locked progression state
 - app save/load shell wiring lives in [src/app.rs](/C:/Users/User/Desktop/chatty-quest/src/app.rs:430)
 
 ### Validation Errors

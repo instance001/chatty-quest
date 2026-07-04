@@ -15,7 +15,15 @@ pub fn describe_current_location(state: &RunState, bundle: &DatapackBundle) -> V
         let exits = location
             .connections
             .iter()
-            .filter_map(|id| find_location(bundle, id).map(|location| location.name.clone()))
+            .filter_map(|id| {
+                find_location(bundle, id).map(|location| {
+                    if state.locked_locations.contains(&location.id) {
+                        format!("{} [locked]", location.name)
+                    } else {
+                        location.name.clone()
+                    }
+                })
+            })
             .collect::<Vec<_>>();
         lines.push(format!("Connections: {}.", exits.join(", ")));
     }
@@ -129,6 +137,10 @@ pub fn equipped_damage(state: &RunState) -> i32 {
                 .map(|item| item.damage)
         })
         .unwrap_or(1)
+}
+
+pub fn is_location_locked(state: &RunState, location_id: &str) -> bool {
+    state.locked_locations.contains(location_id)
 }
 
 pub fn matches_name(query: &str, id: &str, name: &str) -> bool {

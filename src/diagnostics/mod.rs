@@ -75,6 +75,7 @@ pub struct RunHealthReport {
     pub known_locations: usize,
     pub live_enemies: usize,
     pub live_bosses: usize,
+    pub locked_locations: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -245,6 +246,11 @@ pub fn build_diagnostic_report(
         known_locations: run.known_locations.len(),
         live_enemies: run.enemies_alive.len(),
         live_bosses: run.bosses_alive.len(),
+        locked_locations: {
+            let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
+            locked.sort();
+            locked
+        },
     });
 
     let environment_checks = [
@@ -515,6 +521,13 @@ fn format_game_event(event: &GameEvent) -> String {
         } => format!(
             "MovementBlocked(attempted_destination={})",
             attempted_destination
+        ),
+        GameEvent::LocationUnlocked {
+            location_id,
+            item_id,
+        } => format!(
+            "LocationUnlocked(location_id={}, item_id={})",
+            location_id, item_id
         ),
         GameEvent::Inspected { target } => format!("Inspected(target={})", target),
         GameEvent::ItemTaken { item_id } => format!("ItemTaken(item_id={})", item_id),
