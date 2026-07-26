@@ -277,6 +277,7 @@ fn select_media_focus(
             | GameEvent::ActionRejected { .. }
             | GameEvent::MovementBlocked { .. }
             | GameEvent::LocationUnlocked { .. }
+            | GameEvent::LocationBarricaded { .. }
             | GameEvent::DamageTaken { .. }
             | GameEvent::AttackWhiff
             | GameEvent::ObjectiveCompleted { .. }
@@ -424,6 +425,18 @@ fn build_active_cues(
                     ),
                 });
             }
+            GameEvent::LocationBarricaded {
+                location_id,
+                item_id,
+            } => {
+                cues.push(MediaCue {
+                    label: "Approach barricaded".to_owned(),
+                    detail: format!(
+                        "Location '{}' was barricaded with '{}'. A future media hook could surface a secured-threshold beat here.",
+                        location_id, item_id
+                    ),
+                });
+            }
             GameEvent::ObjectiveCompleted { objective_id } => {
                 cues.push(MediaCue {
                     label: "Objective complete".to_owned(),
@@ -542,6 +555,13 @@ fn build_future_hook_keys(
             } => {
                 keys.push(format!("event:location_unlocked:{}", location_id));
                 keys.push(format!("event:item_unlock:{}", item_id));
+            }
+            GameEvent::LocationBarricaded {
+                location_id,
+                item_id,
+            } => {
+                keys.push(format!("event:location_barricaded:{}", location_id));
+                keys.push(format!("event:item_barricade:{}", item_id));
             }
             GameEvent::ObjectiveCompleted { objective_id } => {
                 keys.push(format!("event:objective_complete:{}", objective_id))

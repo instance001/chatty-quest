@@ -37,13 +37,15 @@ This pack is the `v0.1` proof slice for:
 
 Automated validation:
 
-- `cargo test` passes with `14` tests
-- coverage includes datapack loading, run generation, reducer behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
+- original `v0.1` release validation passed on `2026-06-11`
+- the current post-`v0.1` branch now passes `47` automated tests
+- current coverage includes datapack loading, run generation, locked progression, barricade behavior, noise escalation, threat forecasting, finale-phase combat behavior, secured-property finale payoff behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
 
 Manual validation:
 
 - live desktop sweep completed successfully on `2026-06-11`
 - scenario was confirmed playable, completable, saveable, and reloadable
+- refreshed current-branch sweep and audit notes are dated `2026-07-16`
 
 Supporting records:
 
@@ -78,3 +80,7 @@ Media credit:
 The current post-`v0.1` planning anchor is:
 
 - [V0_2_MILESTONE_PLAN.md](V0_2_MILESTONE_PLAN.md)
+
+Current branch note:
+
+- without changing the historical `v0.1` acceptance, the active branch now already includes first-pass `v0.2` siege-depth work for two-lane barricades, noise pressure, guided command surfaces, route forecasts, a wounded `Garage Brute` finale phase, and a secured-property finale payoff

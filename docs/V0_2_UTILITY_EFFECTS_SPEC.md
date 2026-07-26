@@ -2,11 +2,18 @@
 
 ## Purpose
 
-This document fixes the exact shape of the next `v0.2` mechanic before code work begins.
+This document records the exact shape of this `v0.2` mechanic.
 
 The goal is not to build a general item-scripting engine.
 
 The goal is to prove that datapack items can carry deterministic non-combat utility behavior beyond healing and lock access.
+
+Status note:
+
+- this mechanic is implemented on the current branch
+- `torch` uses `utility_effect = "reveal_connections"`
+- validation rejects unknown utility-effect values
+- reducer tests cover route reveal and stable no-new-info behavior
 
 ## First Utility Effect
 
@@ -142,3 +149,9 @@ Do not include these in the first utility-effect pass:
 5. ensure existing map and known-location surfaces reflect the effect automatically
 6. add tests
 7. update docs once stable
+
+## Current Role In `v0.2`
+
+Utility effects are now a completed first-pass foundation.
+
+The next utility-effect work should wait for a concrete scenario need rather than expanding into arbitrary item scripting.

@@ -24,6 +24,8 @@ pub struct RunState {
     pub location_enemies: HashMap<String, Vec<String>>,
     pub location_bosses: HashMap<String, Vec<String>>,
     pub locked_locations: HashSet<String>,
+    pub barricaded_locations: HashSet<String>,
+    pub noise_level: i32,
     pub boundary_response: Option<String>,
     pub rolling_summary: Vec<String>,
 }

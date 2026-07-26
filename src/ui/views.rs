@@ -452,6 +452,12 @@ pub fn show_game_tab(
                                 sidebar.current_location_tags.join(", ")
                             ));
                         }
+                        ui.small(&sidebar.noise_line);
+                        ui.small(&sidebar.noise_hint_line);
+                        ui.small(&sidebar.suggested_command_line);
+                        for status_line in &sidebar.current_location_status_lines {
+                            ui.small(status_line);
+                        }
                         if let Some(layout) = &map_layout {
                             ui.separator();
                             ui.label("Map tiles");
@@ -472,11 +478,23 @@ pub fn show_game_tab(
                                     .button(format!(
                                         "Go to {}{}",
                                         exit.destination_name,
-                                        if exit.locked { " [locked]" } else { "" }
+                                        if exit.locked {
+                                            " [locked]"
+                                        } else if exit.barricaded {
+                                            " [barricaded]"
+                                        } else {
+                                            ""
+                                        }
                                     ))
                                     .clicked()
                                 {
                                     queued_command = Some(format!("go {}", exit.destination_id));
+                                }
+                                if let Some(route_note) = &exit.route_note {
+                                    ui.small(format!("  {}", route_note));
+                                }
+                                if let Some(threat_forecast) = &exit.threat_forecast {
+                                    ui.small(format!("  forecast: {}", threat_forecast));
                                 }
                             }
                         }
@@ -504,7 +522,13 @@ pub fn show_game_tab(
                                 "{} {}{}",
                                 location.marker,
                                 location.location_name,
-                                if location.locked { " [locked]" } else { "" }
+                                if location.locked {
+                                    " [locked]"
+                                } else if location.barricaded {
+                                    " [barricaded]"
+                                } else {
+                                    ""
+                                }
                             ));
                         }
                     }
@@ -783,6 +807,10 @@ pub fn show_character_tab(
             ui.label(format!("Datapack id: {}", summary.datapack_id));
             ui.label(format!("HP: {} / {}", summary.hp, summary.max_hp));
             ui.label(format!(
+                "Noise: {} ({})",
+                summary.noise_level, summary.noise_label
+            ));
+            ui.label(format!(
                 "Current location id: {}",
                 summary.current_location_id
             ));
@@ -812,6 +840,14 @@ pub fn show_character_tab(
                     "none".to_owned()
                 } else {
                     summary.locked_locations.join(", ")
+                }
+            ));
+            ui.small(format!(
+                "Barricaded locations: {}",
+                if summary.barricaded_locations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    summary.barricaded_locations.join(", ")
                 }
             ));
             if !summary.rolling_summary.is_empty() {
@@ -1273,6 +1309,9 @@ fn render_map_tile(
                     if display.show_locked_badge {
                         badge_chip(ui, "Locked", egui::Color32::from_rgb(196, 156, 98));
                     }
+                    if display.show_barricaded_badge {
+                        badge_chip(ui, "Barricaded", egui::Color32::from_rgb(104, 184, 156));
+                    }
                 });
 
                 if display.show_move_button && ui.small_button("Move").clicked() {
@@ -1311,7 +1350,13 @@ fn show_current_exit_strip(
                         "{} {}{}",
                         exit.direction_label,
                         exit.destination_name,
-                        if exit.locked { " [locked]" } else { "" }
+                        if exit.locked {
+                            " [locked]"
+                        } else if exit.barricaded {
+                            " [barricaded]"
+                        } else {
+                            ""
+                        }
                     ))
                     .clicked()
                 {
@@ -1378,6 +1423,7 @@ fn show_map_legend(ui: &mut egui::Ui) {
                     "Loot" => egui::Color32::from_rgb(158, 214, 120),
                     "Threat" => egui::Color32::from_rgb(214, 120, 120),
                     "Objective" => egui::Color32::from_rgb(241, 202, 104),
+                    "Barricaded" => egui::Color32::from_rgb(104, 184, 156),
                     _ => egui::Color32::from_rgb(148, 148, 148),
                 };
                 badge_chip(ui, &badge.label, color);

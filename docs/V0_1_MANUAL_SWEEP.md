@@ -1,6 +1,11 @@
 # `v0.1` Manual Sweep
 
-This is the final short live click-through for Chatty Quest `v0.1`.
+This is the current short live click-through for Chatty Quest.
+
+Refresh note:
+
+- refreshed on `2026-07-16` for the current post-`v0.1` branch
+- this sweep now includes barricade-state, noise-state, guided-command, and siege-route forecast checks
 
 Goal:
 
@@ -70,6 +75,8 @@ Check:
 - using the torch reveals connected routes without moving the player
 - valid movement updates the current location in the map panel
 - the chat log reflects the move
+- the sidebar now surfaces room-role hints for major spaces such as `Front Verandah`, `Back Garden`, and `Garage`
+- the sidebar also surfaces a suggested next command and a readable threat forecast where relevant
 - locked movement is rejected with the garage-lock response
 - invalid movement is rejected with the boundary response
 - connected exits update truthfully after movement
@@ -88,6 +95,7 @@ Action:
 - return to `Front Verandah`
 - verify `use house_keys` now asks for explicit targeting when more than one gate matches
 - run `unlock garage`
+- run `unlock back_garden`
 - open the `Inventory` tab
 - equip the `Battered Cricket Bat`
 - use the `Medkit` after taking damage later, or manually verify it is present and usable first
@@ -97,9 +105,11 @@ Check:
 - the medkit disappears from the room after pickup
 - the medkit appears in inventory
 - the house keys appear in inventory
+- the command bar hint updates toward likely next verbs such as `unlock garage` or `unlock back_garden` once keys are held
 - the torch remains usable and can report when no new nearby routes are left to reveal
 - `use house_keys` does not guess when both `Garage` and `Back Garden` are valid nearby gates
 - `unlock garage` unlocks only the garage
+- `unlock back_garden` unlocks only the back garden
 - equipped state visibly updates for the cricket bat
 - using the medkit removes it from inventory and updates HP
 
@@ -107,7 +117,38 @@ Pass if:
 
 - item state changes are visible in structured UI, not just implied by prose
 
-### 5. Character Tab
+### 5. Barricade Loop
+
+Action:
+
+- unlock and enter `Back Garden`
+- take the `Barricade Kit`
+- wait once in `Back Garden` before barricading it
+- run `barricade back_garden`
+- wait again in `Back Garden`
+- return to `Front Verandah`
+- wait once before barricading it if the `Front Gate Shambler` is still alive
+- run `barricade front_verandah`
+- wait again at `Front Verandah`
+
+Check:
+
+- `Back Garden` and `Front Verandah` both surface barricade state in inspection or sidebar truth
+- both rooms also surface a readable threat forecast before and after securing them
+- waiting in `Back Garden` before barricading causes passive pressure damage
+- barricading `Back Garden` suppresses that pressure
+- barricading `Back Garden` grants the authored HP recovery bonus
+- waiting at `Front Verandah` before barricading causes passive shambler pressure if the shambler is still alive
+- barricading `Front Verandah` suppresses that pressure
+- if noise has climbed, the forecast and helper text make the higher exposed-route pressure visible before another wait
+- map and known-location UI visibly show barricaded spaces
+- exit labels and room-role hints make the two siege routes feel intentionally different
+
+Pass if:
+
+- the player can tell that `Front Verandah` is the threshold-defense lane and `Back Garden` is the risky flank with recovery payoff
+
+### 6. Character Tab
 
 Action:
 
@@ -116,6 +157,7 @@ Action:
 Check:
 
 - HP is visible
+- noise level and label are visible
 - current location is visible
 - objective completion state is visible
 - rolling summary is populated
@@ -126,7 +168,7 @@ Pass if:
 
 - the tab acts as a truthful mechanical snapshot of the run
 
-### 6. Combat And Objective
+### 7. Combat And Objective
 
 Action:
 
@@ -141,6 +183,9 @@ Check:
 - the garage is visibly locked before unlock
 - the back garden is visibly locked before optional unlock
 - the garage becomes visibly unlocked after `unlock garage`
+- if `Back Garden` was barricaded earlier, the UI continues to report it as barricaded
+- if `Garage` is the next meaningful move, the suggested command surface points at it once the route is open
+- if both `Front Verandah` and `Back Garden` were barricaded before entering the `Garage`, the forecast or inspection text acknowledges the secured-property payoff
 - the objective condition lines show `house_keys` held before the boss dies
 - torch-driven reveal behavior never invents movement or objective progress by itself
 - objective progress lines surface when `house_keys` is acquired and when the boss condition completes
@@ -154,7 +199,7 @@ Pass if:
 
 - the scenario can be completed through ordinary play and the UI recognizes the win cleanly
 
-### 7. Media Panel
+### 8. Media Panel
 
 Action:
 
@@ -174,7 +219,7 @@ Pass if:
 
 - media behaves like presentation attached to truth
 
-### 8. Save And Load
+### 9. Save And Load
 
 Action:
 
@@ -187,6 +232,8 @@ Check:
 - HP restores correctly
 - inventory restores correctly
 - locked/unlocked gate state restores correctly for the garage and any other changed gate
+- barricaded state restores correctly for the verandah and any barricaded flank
+- noise state restores correctly
 - objective state restores correctly
 - the app returns to a coherent playable shell rather than a half-loaded state
 
@@ -194,7 +241,7 @@ Pass if:
 
 - the run can be stopped and resumed without confusion
 
-### 9. Diagnostics Tab
+### 10. Diagnostics Tab
 
 Action:
 
@@ -205,6 +252,8 @@ Check:
 - the panel renders cleanly
 - application/content/run/environment sections are readable
 - lock-state truth is visible and understandable
+- barricade-state truth is visible and understandable
+- noise truth is visible and understandable
 - missing media warnings are understandable rather than cryptic
 - recent events and counters make sense relative to what you just did
 
@@ -225,10 +274,4 @@ Treat the sweep as failed if any of the following happens:
 
 ## Finish
 
-If every section above passes, update the acceptance audit from:
-
-- `provisionally on-track`
-
-to:
-
-- `v0.1 accepted`
+If every section above passes, record the current branch sweep result in the acceptance audit or release notes without changing the historical `v0.1` acceptance date.

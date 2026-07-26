@@ -70,6 +70,7 @@ pub struct RunHealthReport {
     pub location_id: String,
     pub hp: i32,
     pub max_hp: i32,
+    pub noise_level: i32,
     pub objective_complete: bool,
     pub objective_condition_rows: Vec<String>,
     pub inventory_items: usize,
@@ -77,6 +78,7 @@ pub struct RunHealthReport {
     pub live_enemies: usize,
     pub live_bosses: usize,
     pub locked_locations: Vec<String>,
+    pub barricaded_locations: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -242,6 +244,7 @@ pub fn build_diagnostic_report(
         location_id: run.current_location_id.clone(),
         hp: run.hp,
         max_hp: run.max_hp,
+        noise_level: run.noise_level,
         objective_complete: run.active_objective.completed,
         objective_condition_rows: build_objective_condition_rows(run),
         inventory_items: run.inventory.len(),
@@ -252,6 +255,11 @@ pub fn build_diagnostic_report(
             let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
             locked.sort();
             locked
+        },
+        barricaded_locations: {
+            let mut barricaded = run.barricaded_locations.iter().cloned().collect::<Vec<_>>();
+            barricaded.sort();
+            barricaded
         },
     });
 
@@ -529,6 +537,13 @@ fn format_game_event(event: &GameEvent) -> String {
             item_id,
         } => format!(
             "LocationUnlocked(location_id={}, item_id={})",
+            location_id, item_id
+        ),
+        GameEvent::LocationBarricaded {
+            location_id,
+            item_id,
+        } => format!(
+            "LocationBarricaded(location_id={}, item_id={})",
             location_id, item_id
         ),
         GameEvent::Inspected { target } => format!("Inspected(target={})", target),

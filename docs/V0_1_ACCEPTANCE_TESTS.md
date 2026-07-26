@@ -105,6 +105,35 @@ Pass condition:
 
 The player can inspect core mechanical state without relying on prose alone.
 
+## Barricade And Siege Pressure
+
+The following should work:
+
+- barricadable rooms visibly surface whether they are exposed or secured
+- `Front Verandah` and `Back Garden` can both be barricaded through explicit deterministic commands
+- passive threat pressure applies before barricading in those authored rooms
+- passive threat pressure is suppressed after barricading
+- authored room-specific payoff differences remain visible, including the `Back Garden` recovery bonus
+- exposed-route pressure warnings or helper surfaces make the likely penalty legible before the player has to eat it blindly
+
+Pass condition:
+
+The player can understand and use the siege mechanic through structured truth, not only through trial-and-error prose.
+
+## Noise And Escalation
+
+The following should work:
+
+- the current noise state is visible in the `Game`, `Character`, and diagnostics surfaces
+- loud actions raise noise deterministically
+- waiting in a barricaded location lowers noise deterministically
+- exposed-route risk gets worse at higher noise where authored
+- the player can tell from the UI when noise is making an exposed route more dangerous
+
+Pass condition:
+
+The escalation layer is visible, deterministic, and understandable without requiring the player to reverse-engineer it from damage logs.
+
 ## Movement And Boundaries
 
 The following should work:
@@ -142,6 +171,7 @@ The following should work:
 - HP changes are reflected in structured state
 - enemy alive or dead state updates correctly
 - boss alive or dead state updates correctly when relevant
+- authored finale payoffs, such as secured-route preparation, affect combat only through reducer-owned deterministic rules
 
 Pass condition:
 
@@ -157,6 +187,7 @@ The following should work:
 - objective-related state progresses when the required conditions are met
 - objective completion is driven by structured state rather than narrator prose
 - win or loss is surfaced clearly in UI state as well as narration
+- guided command or helper surfaces can point toward the next likely objective verb without forcing the player to use them
 
 Pass condition:
 
@@ -181,7 +212,7 @@ The following should work:
 
 - saving writes a JSON save file
 - loading restores the run state accurately
-- restored state includes player location, inventory, HP, objective progress, objective condition truth, and lock-state truth
+- restored state includes player location, inventory, HP, objective progress, objective condition truth, lock-state truth, barricade-state truth, and noise-state truth
 - loading a save returns the user to a coherent playable state
 
 Pass condition:

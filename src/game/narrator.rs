@@ -109,6 +109,7 @@ impl MockNarrator {
             | GameEvent::ActionRejected { .. }
             | GameEvent::MovementBlocked { .. }
             | GameEvent::LocationUnlocked { .. }
+            | GameEvent::LocationBarricaded { .. }
             | GameEvent::DamageTaken { .. }
             | GameEvent::AttackWhiff
             | GameEvent::ObjectiveCompleted { .. }
@@ -158,7 +159,7 @@ impl MockNarrator {
                 Some(GameAction::Move { .. }) | Some(GameAction::Look) | Some(GameAction::Wait) => {
                     format!("The place makes its case quickly: {}", brief)
                 }
-                Some(GameAction::Unlock { .. }) => {
+                Some(GameAction::Unlock { .. }) | Some(GameAction::Barricade { .. }) => {
                     format!("The mechanism gives up its little truth: {}", brief)
                 }
                 Some(GameAction::Inspect { .. }) => {
@@ -185,7 +186,7 @@ impl MockNarrator {
                         brief
                     )
                 }
-                Some(GameAction::Unlock { .. }) => {
+                Some(GameAction::Unlock { .. }) | Some(GameAction::Barricade { .. }) => {
                     format!("Even the hardware joins the bit: {}", brief)
                 }
                 Some(GameAction::Inspect { .. }) => {
@@ -209,7 +210,7 @@ impl MockNarrator {
                 Some(GameAction::Move { .. }) | Some(GameAction::Look) | Some(GameAction::Wait) => {
                     format!("The place settles around you like this: {}", brief)
                 }
-                Some(GameAction::Unlock { .. }) => {
+                Some(GameAction::Unlock { .. }) | Some(GameAction::Barricade { .. }) => {
                     format!("The small mechanism yields in a readable way: {}", brief)
                 }
                 Some(GameAction::Inspect { .. }) => {
@@ -234,7 +235,7 @@ impl MockNarrator {
             Some(GameAction::Move { .. }) | Some(GameAction::Look) | Some(GameAction::Wait) => {
                 format!("The place reads like this: {}", brief)
             }
-            Some(GameAction::Unlock { .. }) => {
+            Some(GameAction::Unlock { .. }) | Some(GameAction::Barricade { .. }) => {
                 format!("The gate gives up its state cleanly: {}", brief)
             }
             Some(GameAction::Inspect { .. }) => {

@@ -110,6 +110,8 @@ mod tests {
         run.hp = 7;
         run.active_objective.completed = true;
         run.locked_locations.remove("garage");
+        run.barricaded_locations.insert("front_verandah".to_owned());
+        run.noise_level = 2;
 
         let payload = SavePayload {
             save_version: current_save_version(),
@@ -160,6 +162,13 @@ mod tests {
             Some("garage")
         );
         assert!(!restored.run_state.locked_locations.contains("garage"));
+        assert!(
+            restored
+                .run_state
+                .barricaded_locations
+                .contains("front_verandah")
+        );
+        assert_eq!(restored.run_state.noise_level, 2);
         assert_eq!(restored.run_state.inventory.len(), run.inventory.len());
         assert_eq!(restored.run_state.equipped_item_id, run.equipped_item_id);
     }

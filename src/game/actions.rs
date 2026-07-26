@@ -6,6 +6,7 @@ pub enum GameAction {
     Look,
     Move { destination: String },
     Unlock { target: String },
+    Barricade { target: String },
     Inspect { target: String },
     Take { item_name: String },
     Equip { item_name: String },
@@ -46,6 +47,10 @@ pub enum GameEvent {
         attempted_destination: String,
     },
     LocationUnlocked {
+        location_id: String,
+        item_id: String,
+    },
+    LocationBarricaded {
         location_id: String,
         item_id: String,
     },
@@ -126,6 +131,15 @@ pub fn parse_action(input: &str) -> Result<GameAction, String> {
             target: rest.trim().to_owned(),
         });
     }
+    if let Some(rest) = lower
+        .strip_prefix("barricade ")
+        .or_else(|| lower.strip_prefix("fortify "))
+        .or_else(|| lower.strip_prefix("secure "))
+    {
+        return Ok(GameAction::Barricade {
+            target: rest.trim().to_owned(),
+        });
+    }
     if let Some(rest) = lower.strip_prefix("inspect ") {
         return Ok(GameAction::Inspect {
             target: rest.trim().to_owned(),
@@ -147,7 +161,7 @@ pub fn parse_action(input: &str) -> Result<GameAction, String> {
         });
     }
 
-    Err("I only understand a narrow set of commands right now. Try: help, look, go ..., unlock ..., inspect ..., take ..., equip ..., use ..., attack, wait.".to_owned())
+    Err("I only understand a narrow set of commands right now. Try: help, look, go ..., unlock ..., barricade ..., inspect ..., take ..., equip ..., use ..., attack, wait.".to_owned())
 }
 
 #[cfg(test)]
@@ -163,6 +177,18 @@ mod tests {
         assert!(matches!(
             parse_action("open garage"),
             Ok(GameAction::Unlock { target }) if target == "garage"
+        ));
+    }
+
+    #[test]
+    fn parse_action_supports_barricade_aliases() {
+        assert!(matches!(
+            parse_action("barricade front verandah"),
+            Ok(GameAction::Barricade { target }) if target == "front verandah"
+        ));
+        assert!(matches!(
+            parse_action("fortify front verandah"),
+            Ok(GameAction::Barricade { target }) if target == "front verandah"
         ));
     }
 }

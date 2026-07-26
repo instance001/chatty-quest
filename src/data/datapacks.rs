@@ -107,6 +107,20 @@ pub struct LocationTemplate {
     #[serde(default)]
     pub connections: Vec<String>,
     #[serde(default)]
+    pub barricadable: bool,
+    #[serde(default)]
+    pub barricade_item_id: Option<String>,
+    #[serde(default)]
+    pub barricade_response: Option<String>,
+    #[serde(default)]
+    pub already_barricaded_response: Option<String>,
+    #[serde(default)]
+    pub barricade_heal: i32,
+    #[serde(default)]
+    pub barricade_blocks_retaliation: bool,
+    #[serde(default)]
+    pub barricade_attack_bonus: i32,
+    #[serde(default)]
     pub locked: bool,
     #[serde(default)]
     pub unlock_item_id: Option<String>,
@@ -372,7 +386,7 @@ fn load_datapack_bundle_from_path(
         for item in &items.items {
             if let Some(utility_effect) = item.utility_effect.as_deref() {
                 match utility_effect.trim() {
-                    "reveal_connections" => {}
+                    "reveal_connections" | "barricade" => {}
                     "" => errors.push(format!(
                         "Item '{}' must not define a blank utility_effect.",
                         item.id
@@ -446,6 +460,70 @@ fn load_datapack_bundle_from_path(
                         location.id, unlock_item_id
                     ));
                 }
+            }
+            if location.barricadable {
+                let Some(barricade_item_id) = location
+                    .barricade_item_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    errors.push(format!(
+                        "Barricadable location '{}' must define barricade_item_id.",
+                        location.id
+                    ));
+                    continue;
+                };
+                if !known_items.contains(barricade_item_id) {
+                    errors.push(format!(
+                        "Location '{}' references unknown barricade_item_id '{}'.",
+                        location.id, barricade_item_id
+                    ));
+                }
+            } else {
+                for (field_name, value) in [
+                    ("barricade_item_id", location.barricade_item_id.as_deref()),
+                    ("barricade_response", location.barricade_response.as_deref()),
+                    (
+                        "already_barricaded_response",
+                        location.already_barricaded_response.as_deref(),
+                    ),
+                ] {
+                    if value.is_some() {
+                        errors.push(format!(
+                            "Location '{}' defines {} but is not barricadable.",
+                            location.id, field_name
+                        ));
+                    }
+                }
+            }
+            if let Some(response) = &location.barricade_response
+                && response.trim().is_empty()
+            {
+                errors.push(format!(
+                    "Location '{}' must not define a blank barricade_response.",
+                    location.id
+                ));
+            }
+            if let Some(response) = &location.already_barricaded_response
+                && response.trim().is_empty()
+            {
+                errors.push(format!(
+                    "Location '{}' must not define a blank already_barricaded_response.",
+                    location.id
+                ));
+            }
+            if location.barricade_heal < 0 {
+                errors.push(format!(
+                    "Location '{}' must not define a negative barricade_heal.",
+                    location.id
+                ));
+            }
+            if location.barricade_attack_bonus < 0 {
+                errors.push(format!(
+                    "Location '{}' must not define a negative barricade_attack_bonus.",
+                    location.id
+                ));
             }
             for item_id in &location.items {
                 if !known_items.contains(item_id.as_str()) {
@@ -950,7 +1028,7 @@ damage = 1
 
         assert_eq!(record.summary.display_name, "Property Siege Classic");
         assert_eq!(record.summary.location_count, 5);
-        assert_eq!(record.summary.item_count, 4);
+        assert_eq!(record.summary.item_count, 5);
         assert_eq!(record.summary.enemy_count, 2);
         assert_eq!(record.summary.boss_count, 1);
         assert_eq!(record.summary.objective_count, 1);
@@ -970,6 +1048,7 @@ damage = 1
                 .any(|location| location.id == "garage")
         );
         assert!(bundle.items.iter().any(|item| item.id == "cricket_bat"));
+        assert!(bundle.items.iter().any(|item| item.id == "barricade_kit"));
         assert_eq!(
             bundle
                 .items
@@ -1003,6 +1082,18 @@ damage = 1
             .expect("expected garage template");
         assert!(garage.locked);
         assert_eq!(garage.unlock_item_id.as_deref(), Some("house_keys"));
+        let front_verandah = bundle
+            .locations
+            .iter()
+            .find(|location| location.id == "front_verandah")
+            .expect("expected front verandah template");
+        assert!(front_verandah.barricadable);
+        assert_eq!(
+            front_verandah.barricade_item_id.as_deref(),
+            Some("barricade_kit")
+        );
+        assert!(front_verandah.barricade_blocks_retaliation);
+        assert_eq!(front_verandah.barricade_attack_bonus, 1);
         let back_garden = bundle
             .locations
             .iter()
@@ -1010,6 +1101,15 @@ damage = 1
             .expect("expected back garden template");
         assert!(back_garden.locked);
         assert_eq!(back_garden.unlock_item_id.as_deref(), Some("house_keys"));
+        assert!(back_garden.barricadable);
+        assert_eq!(
+            back_garden.barricade_item_id.as_deref(),
+            Some("barricade_kit")
+        );
+        assert_eq!(back_garden.barricade_heal, 2);
+        assert!(!back_garden.barricade_blocks_retaliation);
+        assert_eq!(back_garden.barricade_attack_bonus, 0);
+        assert_eq!(back_garden.items, vec!["barricade_kit".to_owned()]);
     }
 
     #[test]
@@ -1112,6 +1212,45 @@ utility_effect = "unknown_effect"
             errors
                 .iter()
                 .any(|error| { error.contains("defines unknown utility_effect 'unknown_effect'") })
+        );
+    }
+
+    #[test]
+    fn location_validation_rejects_unknown_barricade_item_id() {
+        let dir = TempDatapackDir::new("location_unknown_barricade_item");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+tags = ["start"]
+connections = []
+barricadable = true
+barricade_item_id = "missing_kit"
+items = []
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors.iter().any(|error| {
+                error.contains("references unknown barricade_item_id 'missing_kit'")
+            })
         );
     }
 }

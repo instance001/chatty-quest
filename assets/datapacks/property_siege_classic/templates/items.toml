@@ -50,3 +50,12 @@ damage = 0
 image = "media/images/items/house_keys.png"
 audio = "media/audio/items/keys_jingle.ogg"
 display_role = "item"
+
+[[items]]
+id = "barricade_kit"
+name = "Barricade Kit"
+description = "A rough bundle of planks, nails, and just enough bad judgment to improve your odds."
+narrator_brief = "Treat the kit like a desperate little promise that the house might still be convinced to help defend itself."
+tags = ["utility", "barricade_tool"]
+damage = 0
+utility_effect = "barricade"

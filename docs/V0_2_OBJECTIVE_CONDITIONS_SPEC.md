@@ -2,13 +2,18 @@
 
 ## Purpose
 
-This document fixes the exact shape of the second `v0.2` expansion before code work begins.
+This document records the exact shape of the second `v0.2` expansion.
+
+Status note:
+
+- refreshed on `2026-07-16`
+- mixed objective conditions are implemented on the current branch
 
 The goal is not to invent a general quest language.
 
 The goal is to prove that objective completion can be driven by more than one deterministic condition family while keeping reducer truth simple.
 
-## First Objective Expansion
+## Current Implemented Expansion
 
 Add optional item-possession support to objectives.
 
@@ -120,13 +125,14 @@ For `v0.2`, objective completion should remain live truth:
 
 - current state decides whether the objective is complete
 
-## Current Scenario Recommendation
+## Current Scenario Use
 
-`Property Siege Classic` should adopt the new field in the primary objective.
+`Property Siege Classic` currently uses all three supported deterministic condition fields in the primary objective.
 
-Recommended first content use:
+Current content use:
 
 - require `house_keys`
+- require `garage`
 - require defeat of `brute_in_garage`
 
 Why this specific pairing:
@@ -134,6 +140,17 @@ Why this specific pairing:
 - it matches the new gated route
 - it prevents the objective model from becoming broader without being used
 - it proves the objective system can combine inventory and combat truth without adding a second scenario
+
+Current garage-finale reading:
+
+- the objective destination is not just a box to tick
+- the `garage` now acts as a readable finale room with a live boss-space identity
+- once `brute_in_garage` is pushed into its wounded end state, the room and combat text both surface that the finish has become more dangerous
+- if both exposed siege lanes are barricaded before the fight, the garage finale also surfaces a small secured-property payoff through reduced brute retaliation
+
+Those wrinkles do not change objective truth semantics.
+
+They make the final condition feel more authored than a flat last HP exchange.
 
 ## UI Truth Surfacing
 
@@ -157,20 +174,14 @@ Required behavior:
 - objective completion still round-trips correctly after save/load
 - item-backed objective truth recalculates correctly from restored inventory
 
-## Tests Required
+## Current Verified Behaviors
 
-Minimum automated coverage:
+Current automated coverage includes:
 
-- datapack validation rejects an objective with both completion fields missing
-- datapack validation rejects unknown `required_item_id`
-- datapack validation rejects unknown `required_location_id`
-- generated run copies `required_item_id` into active objective state
-- generated run copies `required_location_id` into active objective state
-- picking up the required item can satisfy an item-only objective
-- reaching the required location can satisfy a location-only objective
-- a mixed boss-plus-item objective completes only when both are true
-- a mixed item-plus-location objective completes only when both are true
-- save/load preserves completion truth for mixed conditions
+- datapack validation rejects missing or unknown completion references
+- generated run copies `required_item_id` and `required_location_id`
+- item-only, location-only, and mixed-condition objective cases evaluate correctly
+- save/load preserves mixed-condition completion truth
 
 ## Explicit Non-Goals
 
@@ -183,13 +194,12 @@ Do not include these in the first objective-condition pass:
 - fail-state objectives
 - generic rules engine abstractions
 
-## Implementation Order
+## Current Role In `v0.2`
 
-1. extend datapack schema with optional `required_item_id`
-2. validate that at least one supported objective condition field is present
-3. extend `ObjectiveState`
-4. update run generation to copy the new field
-5. update reducer completion logic to evaluate populated conditions with `AND` semantics
-6. update `Property Siege Classic` objective content
-7. surface the added condition in UI and diagnostics
-8. add tests and acceptance doc updates once stable
+This system is now a completed foundation.
+
+The remaining work is not to re-prove objective conditions exist. It is to use them more clearly only when a concrete scenario need appears:
+
+- richer scenario content that benefits from the existing condition model
+- small finale-authorship beats that make the required destination and boss condition feel intentional
+- future condition families only when item, location, and boss truth are no longer enough

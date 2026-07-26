@@ -27,6 +27,8 @@ pub struct CharacterSummaryModel {
     pub datapack_id: String,
     pub hp: i32,
     pub max_hp: i32,
+    pub noise_level: i32,
+    pub noise_label: String,
     pub current_location_id: String,
     pub current_location_name: Option<String>,
     pub objective_complete: bool,
@@ -36,6 +38,7 @@ pub struct CharacterSummaryModel {
     pub enemies_defeated: usize,
     pub bosses_defeated: usize,
     pub locked_locations: Vec<String>,
+    pub barricaded_locations: Vec<String>,
     pub rolling_summary: Vec<String>,
     pub pack_folder: Option<String>,
     pub objective_tags: Option<String>,
@@ -55,6 +58,9 @@ pub struct ExitRowModel {
     pub destination_id: String,
     pub destination_name: String,
     pub locked: bool,
+    pub barricaded: bool,
+    pub route_note: Option<String>,
+    pub threat_forecast: Option<String>,
 }
 
 #[derive(Clone)]
@@ -69,6 +75,7 @@ pub struct KnownLocationRowModel {
     pub location_name: String,
     pub marker: String,
     pub locked: bool,
+    pub barricaded: bool,
 }
 
 #[derive(Clone)]
@@ -76,6 +83,10 @@ pub struct GameSidebarModel {
     pub current_location_name: String,
     pub current_location_description: String,
     pub current_location_tags: Vec<String>,
+    pub noise_line: String,
+    pub noise_hint_line: String,
+    pub suggested_command_line: String,
+    pub current_location_status_lines: Vec<String>,
     pub connected_exits: Vec<ExitRowModel>,
     pub local_item_count: usize,
     pub known_locations: Vec<KnownLocationRowModel>,
@@ -218,6 +229,7 @@ pub struct MapExitButtonModel {
     pub destination_id: String,
     pub destination_name: String,
     pub locked: bool,
+    pub barricaded: bool,
 }
 
 #[derive(Clone)]
@@ -234,6 +246,7 @@ pub struct MapTileDisplayModel {
     pub show_threat_badge: bool,
     pub show_objective_badge: bool,
     pub show_locked_badge: bool,
+    pub show_barricaded_badge: bool,
     pub show_move_button: bool,
     pub show_advance_button: bool,
 }
@@ -272,6 +285,10 @@ pub fn build_game_header_chips(run: Option<&RunState>, chaos_mode: f32) -> Vec<S
         chips.push(StatusChipModel {
             label: "HP".to_owned(),
             value: format!("{} / {}", run.hp, run.max_hp),
+        });
+        chips.push(StatusChipModel {
+            label: "Noise".to_owned(),
+            value: noise_label(run.noise_level).to_owned(),
         });
         chips.push(StatusChipModel {
             label: "Enemies".to_owned(),
@@ -338,6 +355,8 @@ pub fn build_character_summary(
         datapack_id: run.datapack_id.clone(),
         hp: run.hp,
         max_hp: run.max_hp,
+        noise_level: run.noise_level,
+        noise_label: noise_label(run.noise_level).to_owned(),
         current_location_id: run.current_location_id.clone(),
         current_location_name,
         objective_complete: run.active_objective.completed,
@@ -350,6 +369,11 @@ pub fn build_character_summary(
             let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
             locked.sort();
             locked
+        },
+        barricaded_locations: {
+            let mut barricaded = run.barricaded_locations.iter().cloned().collect::<Vec<_>>();
+            barricaded.sort();
+            barricaded
         },
         rolling_summary: run.rolling_summary.clone(),
         pack_folder: bundle.map(|bundle| bundle.folder_name.clone()),
@@ -394,6 +418,9 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
                     destination_id: destination.id.clone(),
                     destination_name: destination.name.clone(),
                     locked: run.locked_locations.contains(&destination.id),
+                    barricaded: run.barricaded_locations.contains(&destination.id),
+                    route_note: route_note_for_location(destination),
+                    threat_forecast: threat_forecast_for_location(run, destination),
                 })
         })
         .collect();
@@ -425,14 +452,59 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
                 location_name: location.name.clone(),
                 marker: marker.to_owned(),
                 locked: run.locked_locations.contains(&location.id),
+                barricaded: run.barricaded_locations.contains(&location.id),
             }
         })
         .collect();
+
+    let mut current_location_status_lines = Vec::new();
+    if current_location.barricadable {
+        current_location_status_lines.push(format!(
+            "Barricade: {}",
+            if run.barricaded_locations.contains(&current_location.id) {
+                "secured"
+            } else {
+                "exposed"
+            }
+        ));
+        if current_location.barricade_heal > 0 {
+            current_location_status_lines.push(format!(
+                "Barricade bonus: recover {} HP when secured here",
+                current_location.barricade_heal
+            ));
+        }
+        if run.barricaded_locations.contains(&current_location.id) {
+            current_location_status_lines
+                .push("Pressure: local route pressure is currently suppressed here".to_owned());
+        } else {
+            current_location_status_lines
+                .push("Pressure: lingering outside threats can still chip you here".to_owned());
+        }
+    }
+    if let Some(route_note) = route_note_for_location(current_location) {
+        current_location_status_lines.push(format!("Route role: {}", route_note));
+    }
+    if let Some(threat_forecast) = threat_forecast_for_location(run, current_location) {
+        current_location_status_lines.push(format!("Threat forecast: {}", threat_forecast));
+    }
+    if run.active_objective.required_location_id.as_deref() == Some(current_location.id.as_str())
+        && !run.active_objective.completed
+    {
+        current_location_status_lines
+            .push("Objective: this room satisfies the location requirement".to_owned());
+    }
 
     Some(GameSidebarModel {
         current_location_name: current_location.name.clone(),
         current_location_description: current_location.description.clone(),
         current_location_tags: current_location.tags.clone(),
+        noise_line: format!("Noise: {}", noise_label(run.noise_level)),
+        noise_hint_line: noise_hint_line(run.noise_level).to_owned(),
+        suggested_command_line: format!(
+            "Suggested next command: {}",
+            recommended_command(run, bundle)
+        ),
+        current_location_status_lines,
         connected_exits,
         local_item_count,
         known_locations,
@@ -443,18 +515,21 @@ pub fn build_game_action_bar(
     run: Option<&RunState>,
     bundle: Option<&DatapackBundle>,
 ) -> GameActionBarModel {
-    let primary_actions = [
-        ("Look", "look"),
-        ("Help", "help"),
-        ("Attack", "attack"),
-        ("Wait", "wait"),
-    ]
-    .into_iter()
-    .map(|(label, command)| ActionButtonModel {
-        label: label.to_owned(),
-        command: command.to_owned(),
-    })
-    .collect();
+    let primary_actions = run
+        .zip(bundle)
+        .map(|(run, bundle)| contextual_primary_actions(run, bundle))
+        .unwrap_or_else(|| {
+            vec![
+                ActionButtonModel {
+                    label: "Look".to_owned(),
+                    command: "look".to_owned(),
+                },
+                ActionButtonModel {
+                    label: "Help".to_owned(),
+                    command: "help".to_owned(),
+                },
+            ]
+        });
 
     let quick_exits = run
         .zip(bundle)
@@ -466,7 +541,10 @@ pub fn build_game_action_bar(
         primary_actions,
         quick_exits,
         command_label: "Command".to_owned(),
-        command_hint: "Type an action...".to_owned(),
+        command_hint: run
+            .zip(bundle)
+            .map(|(run, bundle)| format!("Try: {}", recommended_command(run, bundle)))
+            .unwrap_or_else(|| "Type an action...".to_owned()),
         submit_label: "Submit".to_owned(),
     }
 }
@@ -571,6 +649,11 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
             format!("Location: {}", run.location_id),
             format!("HP: {} / {}", run.hp, run.max_hp),
             format!(
+                "Noise: {} ({})",
+                run.noise_level,
+                noise_label(run.noise_level)
+            ),
+            format!(
                 "Objective complete: {}",
                 if run.objective_complete { "yes" } else { "no" }
             ),
@@ -587,6 +670,19 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
                 } else {
                     run.locked_locations.join(", ")
                 }
+            ),
+            format!(
+                "Barricaded locations: {}",
+                if run.barricaded_locations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    run.barricaded_locations.join(", ")
+                }
+            ),
+            format!(
+                "Noise: {} ({})",
+                run.noise_level,
+                noise_label(run.noise_level)
             ),
         ];
         rows.extend(run.objective_condition_rows.iter().cloned());
@@ -801,6 +897,10 @@ pub fn build_map_legend() -> MapLegendModel {
             MapLegendBadgeModel {
                 label: "Locked".to_owned(),
                 description: "gated progression".to_owned(),
+            },
+            MapLegendBadgeModel {
+                label: "Barricaded".to_owned(),
+                description: "secured approach".to_owned(),
             },
         ],
         marker_rows: vec![
@@ -1126,6 +1226,7 @@ pub fn build_map_exit_buttons(
             destination_id: tile.location_id.clone(),
             destination_name: tile.name.clone(),
             locked: run.locked_locations.contains(&tile.location_id),
+            barricaded: run.barricaded_locations.contains(&tile.location_id),
         })
         .collect::<Vec<_>>();
 
@@ -1186,6 +1287,8 @@ pub fn build_map_tile_display(
         show_threat_badge: is_fully_visible && tile.has_live_threats,
         show_objective_badge: is_fully_visible && tile.has_objective_target,
         show_locked_badge: is_fully_visible && run.locked_locations.contains(&tile.location_id),
+        show_barricaded_badge: is_fully_visible
+            && run.barricaded_locations.contains(&tile.location_id),
         show_move_button: is_adjacent_exit,
         show_advance_button: matches!(visibility, MapTileVisibilityModel::Hinted),
     }
@@ -1220,6 +1323,9 @@ pub fn build_map_tile_hover(
         }
         if display.show_locked_badge {
             detail_rows.push("Locked".to_owned());
+        }
+        if display.show_barricaded_badge {
+            detail_rows.push("Barricaded".to_owned());
         }
     }
 
@@ -1474,4 +1580,393 @@ fn build_objective_condition_rows(run: &RunState) -> Vec<String> {
     }
 
     rows
+}
+
+fn route_note_for_location(location: &crate::data::datapacks::LocationTemplate) -> Option<String> {
+    match location.id.as_str() {
+        "front_verandah" => Some("threshold defense against front-gate pressure".to_owned()),
+        "back_garden" => {
+            if location.barricade_heal > 0 {
+                Some(format!(
+                    "risky flank that can return {} HP when secured",
+                    location.barricade_heal
+                ))
+            } else {
+                Some("risky flank route".to_owned())
+            }
+        }
+        "garage" => Some("boss route and objective destination".to_owned()),
+        _ => None,
+    }
+}
+
+fn threat_forecast_for_location(
+    run: &RunState,
+    location: &crate::data::datapacks::LocationTemplate,
+) -> Option<String> {
+    match location.id.as_str() {
+        "front_verandah" => {
+            if !run.enemies_alive.contains("shambler_front_gate") {
+                Some("front gate pressure is cleared".to_owned())
+            } else if run.barricaded_locations.contains(&location.id) {
+                Some("safe from passive threshold chip while the barricade holds".to_owned())
+            } else {
+                Some(format!(
+                    "waiting here will cost {} HP until the front route is secured",
+                    exposed_route_pressure_preview(run)
+                ))
+            }
+        }
+        "back_garden" => {
+            if run.locked_locations.contains(&location.id) {
+                Some("currently gated, but still the only route to the barricade kit".to_owned())
+            } else if !run.enemies_alive.contains("crawler_in_weeds") {
+                Some("flank threat is cleared".to_owned())
+            } else if run.barricaded_locations.contains(&location.id) {
+                Some("safe from passive flank chip and usable as a recovery pocket".to_owned())
+            } else {
+                Some(format!(
+                    "waiting here will cost {} HP until the back edge is secured",
+                    exposed_route_pressure_preview(run)
+                ))
+            }
+        }
+        "garage" => {
+            let boss_alive = run
+                .location_bosses
+                .get(&location.id)
+                .into_iter()
+                .flatten()
+                .any(|boss_id| run.bosses_alive.contains(boss_id));
+            if run.locked_locations.contains(&location.id) {
+                Some("locked until you are holding the house keys".to_owned())
+            } else if boss_alive && property_siege_lanes_secured(run) {
+                Some(
+                    "finale is live, but both siege lanes are secured; brute retaliation is reduced"
+                        .to_owned(),
+                )
+            } else if boss_alive {
+                Some("objective room is live; expect boss retaliation, not passive chip".to_owned())
+            } else {
+                Some("objective room is open and mostly stabilized".to_owned())
+            }
+        }
+        _ => None,
+    }
+}
+
+fn exposed_route_pressure_preview(run: &RunState) -> i32 {
+    if run.noise_level >= 2 { 2 } else { 1 }
+}
+
+fn property_siege_lanes_secured(run: &RunState) -> bool {
+    run.barricaded_locations.contains("front_verandah")
+        && run.barricaded_locations.contains("back_garden")
+}
+
+fn noise_label(level: i32) -> &'static str {
+    match level {
+        0 => "Quiet",
+        1 => "Stirred",
+        2 => "Loud",
+        _ => "Swarming",
+    }
+}
+
+fn noise_hint_line(level: i32) -> &'static str {
+    match level {
+        0 => "Quiet buys planning time. Loud actions wake the whole property up.",
+        1 => "The house is listening now. Another loud action will make exposed routes harsher.",
+        2 => "Exposed outdoor routes now hit harder, and retaliation gets meaner.",
+        _ => "Maximum pressure. Stabilize behind cover or finish the route fast.",
+    }
+}
+
+fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<ActionButtonModel> {
+    let mut actions = Vec::new();
+    push_action(&mut actions, "Look", "look");
+
+    if let Some(location) = bundle
+        .locations
+        .iter()
+        .find(|location| location.id == run.current_location_id)
+    {
+        let has_live_enemy = run
+            .location_enemies
+            .get(&location.id)
+            .into_iter()
+            .flatten()
+            .any(|enemy_id| run.enemies_alive.contains(enemy_id));
+        let has_live_boss = run
+            .location_bosses
+            .get(&location.id)
+            .into_iter()
+            .flatten()
+            .any(|boss_id| run.bosses_alive.contains(boss_id));
+
+        if has_live_enemy || has_live_boss {
+            push_action(&mut actions, "Attack", "attack");
+        }
+
+        if location.barricadable
+            && !run.barricaded_locations.contains(&location.id)
+            && location
+                .barricade_item_id
+                .as_deref()
+                .is_some_and(|item_id| run.inventory.iter().any(|item| item.id == item_id))
+        {
+            push_action(
+                &mut actions,
+                "Barricade Here",
+                &format!("barricade {}", location.id),
+            );
+        }
+
+        if let Some(item_id) = run
+            .location_items
+            .get(&location.id)
+            .into_iter()
+            .flatten()
+            .find(|item_id| bundle.items.iter().any(|item| item.id == **item_id))
+        {
+            push_action(&mut actions, "Take Item", &format!("take {}", item_id));
+        }
+
+        for connection_id in &location.connections {
+            let Some(target) = bundle
+                .locations
+                .iter()
+                .find(|candidate| candidate.id == *connection_id)
+            else {
+                continue;
+            };
+
+            if run.locked_locations.contains(&target.id)
+                && target
+                    .unlock_item_id
+                    .as_deref()
+                    .is_some_and(|item_id| run.inventory.iter().any(|item| item.id == item_id))
+            {
+                push_action(
+                    &mut actions,
+                    &format!("Unlock {}", target.name),
+                    &format!("unlock {}", target.id),
+                );
+            }
+        }
+
+        if location.id != "garage"
+            && run.active_objective.required_location_id.as_deref() == Some("garage")
+            && !run.locked_locations.contains("garage")
+            && location
+                .connections
+                .iter()
+                .any(|connection| connection == "garage")
+        {
+            push_action(&mut actions, "Go Garage", "go garage");
+        }
+    }
+
+    push_action(&mut actions, "Wait", "wait");
+    push_action(&mut actions, "Help", "help");
+    actions
+}
+
+fn recommended_command(run: &RunState, bundle: &DatapackBundle) -> String {
+    let Some(location) = bundle
+        .locations
+        .iter()
+        .find(|location| location.id == run.current_location_id)
+    else {
+        return "look".to_owned();
+    };
+
+    let has_live_enemy = run
+        .location_enemies
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .any(|enemy_id| run.enemies_alive.contains(enemy_id));
+    let has_live_boss = run
+        .location_bosses
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .any(|boss_id| run.bosses_alive.contains(boss_id));
+
+    if has_live_enemy || has_live_boss {
+        return "attack".to_owned();
+    }
+
+    if location.barricadable
+        && !run.barricaded_locations.contains(&location.id)
+        && location
+            .barricade_item_id
+            .as_deref()
+            .is_some_and(|item_id| run.inventory.iter().any(|item| item.id == item_id))
+    {
+        return format!("barricade {}", location.id);
+    }
+
+    if let Some(item_id) = run
+        .location_items
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .find(|item_id| bundle.items.iter().any(|item| item.id == **item_id))
+    {
+        return format!("take {}", item_id);
+    }
+
+    if let Some(connection) = location.connections.iter().find_map(|connection_id| {
+        let target = bundle
+            .locations
+            .iter()
+            .find(|candidate| candidate.id == *connection_id)?;
+        let unlock_item_id = target.unlock_item_id.as_deref()?;
+        if run.locked_locations.contains(&target.id)
+            && run.inventory.iter().any(|item| item.id == unlock_item_id)
+        {
+            Some(target.id.clone())
+        } else {
+            None
+        }
+    }) {
+        return format!("unlock {}", connection);
+    }
+
+    if run.active_objective.required_location_id.as_deref() == Some("garage")
+        && !run.locked_locations.contains("garage")
+        && location
+            .connections
+            .iter()
+            .any(|connection| connection == "garage")
+    {
+        return "go garage".to_owned();
+    }
+
+    "look".to_owned()
+}
+
+fn push_action(actions: &mut Vec<ActionButtonModel>, label: &str, command: &str) {
+    if actions.iter().any(|action| action.command == command) {
+        return;
+    }
+
+    actions.push(ActionButtonModel {
+        label: label.to_owned(),
+        command: command.to_owned(),
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data::datapacks::load_datapack_bundle_by_folder;
+    use crate::game::generation::generate_new_run;
+
+    use super::{build_game_action_bar, build_game_sidebar};
+
+    #[test]
+    fn action_bar_recommends_take_for_local_loot_early() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.current_location_id = "kitchen".to_owned();
+        run.known_locations.insert("kitchen".to_owned());
+        run.visited_locations.insert("kitchen".to_owned());
+
+        let action_bar = build_game_action_bar(Some(&run), Some(&bundle));
+
+        assert_eq!(action_bar.command_hint, "Try: take medkit");
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "take medkit")
+        );
+    }
+
+    #[test]
+    fn action_bar_surfaces_unlock_when_player_has_keys() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.inventory.push(crate::game::state::InventoryEntry {
+            id: "house_keys".to_owned(),
+            name: "House Keys".to_owned(),
+            description: "test".to_owned(),
+            damage: 0,
+        });
+
+        let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+        let action_bar = build_game_action_bar(Some(&run), Some(&bundle));
+
+        assert_eq!(
+            sidebar.suggested_command_line,
+            "Suggested next command: attack"
+        );
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "unlock garage")
+        );
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "unlock back_garden")
+        );
+    }
+
+    #[test]
+    fn sidebar_surfaces_threat_forecast_for_exposed_and_secured_routes() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.noise_level = 2;
+
+        let front_sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+        assert!(
+            front_sidebar
+                .current_location_status_lines
+                .iter()
+                .any(|line| { line.contains("Threat forecast: waiting here will cost 2 HP") })
+        );
+
+        run.current_location_id = "back_garden".to_owned();
+        run.locked_locations.remove("back_garden");
+        run.barricaded_locations.insert("back_garden".to_owned());
+        run.known_locations.insert("back_garden".to_owned());
+        run.visited_locations.insert("back_garden".to_owned());
+
+        let back_sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+        assert!(
+            back_sidebar
+                .current_location_status_lines
+                .iter()
+                .any(|line| {
+                    line.contains("safe from passive flank chip and usable as a recovery pocket")
+                })
+        );
+    }
+
+    #[test]
+    fn sidebar_surfaces_secured_property_payoff_for_garage_finale() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.current_location_id = "garage".to_owned();
+        run.locked_locations.remove("garage");
+        run.known_locations.insert("garage".to_owned());
+        run.visited_locations.insert("garage".to_owned());
+        run.barricaded_locations.insert("front_verandah".to_owned());
+        run.barricaded_locations.insert("back_garden".to_owned());
+
+        let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+
+        assert!(sidebar.current_location_status_lines.iter().any(|line| {
+            line.contains("both siege lanes are secured; brute retaliation is reduced")
+        }));
+    }
 }

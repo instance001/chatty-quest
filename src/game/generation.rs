@@ -78,6 +78,7 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         .filter(|location| location.locked)
         .map(|location| location.id.clone())
         .collect::<HashSet<_>>();
+    let barricaded_locations = HashSet::new();
 
     let location_name = bundle
         .locations
@@ -90,7 +91,7 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         format!("Scenario loaded: {}.", bundle.pack.display_name),
         format!("You begin at {}.", location_name),
         format!("Objective locked in: {}.", active_objective.name),
-        "Try commands like: look, go kitchen, inspect kitchen, take medkit, equip cricket bat, use medkit, attack, wait.".to_owned(),
+        "Try commands like: look, take medkit, unlock back_garden, barricade front_verandah, go garage, attack, wait.".to_owned(),
     ];
 
     if let Some(dm_style) = &bundle.dm_style {
@@ -118,6 +119,8 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         location_enemies,
         location_bosses,
         locked_locations,
+        barricaded_locations,
+        noise_level: 0,
         boundary_response: bundle.rules.boundary_response.clone(),
         rolling_summary: vec![format!(
             "Run started for scenario '{}'.",
@@ -198,5 +201,7 @@ mod tests {
         );
         assert!(state.locked_locations.contains("garage"));
         assert!(state.locked_locations.contains("back_garden"));
+        assert!(state.barricaded_locations.is_empty());
+        assert_eq!(state.noise_level, 0);
     }
 }

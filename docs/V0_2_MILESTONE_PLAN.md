@@ -4,6 +4,14 @@
 
 This document defines the first post-`v0.1` build milestone.
 
+Status note:
+
+- this document was refreshed on `2026-07-16`
+- lock state, key-driven gated progression, mixed objective conditions, the first barricade pass, and the first noise-pressure pass are already implemented on the current branch
+- the current branch also includes clearer player-facing truth surfacing for pressure, route state, and recommended next verbs
+- the current branch now also includes small authored garage-finale wrinkles through the `Garage Brute` wounded end phase and a secured-property payoff when both siege lanes are barricaded before the finale
+- the remaining `v0.2` work is now mostly about content depth and selective authored escalation rather than proving those foundations from scratch
+
 `v0.1` proved:
 
 - one datapack can load
@@ -41,27 +49,32 @@ In practical terms, that means:
 
 ## Recommended `v0.2` Scope
 
-### 1. Deterministic Item And State Expansion
+### 1. Deterministic Siege Pressure Expansion
 
 Add one or two content-backed mechanics that deepen the scenario without exploding complexity.
 
 Recommended targets:
 
-- `locked` / `unlocked` location state
-- keys or key-adjacent utility items with a real deterministic job
-- a simple gated progression beat
+- extend the new barricade mechanic beyond one room
+- make optional routes change risk in a visible deterministic way
+- give the player a clearer "secure the property" loop before the boss finish
 
 Why first:
 
-- `house_keys` currently read as emotionally important but mechanically inert
-- the engine should prove that item meaning can move beyond damage/healing without needing a full RPG system
+- the gated route now works, so the next honest gain is making the property feel under siege instead of merely locked
+- barricades already prove the state shape, so the next step is richer authored payoff rather than more foundational abstraction
 
 Concrete deliverables:
 
-- runtime state for lock/unlock or equivalent gated progression
-- reducer support for a legal state-changing use of a utility item
-- datapack-defined scenario rule or location flag that drives the gate
-- visible UI feedback when the gate changes state
+- at least two authored barricade targets with distinct room flavor
+- deterministic pressure suppression or redirection tied to barricade state
+- clearer route choice between direct progression and securing vulnerable spaces
+
+Current branch status:
+
+- complete for first pass
+- `front_verandah` and `back_garden` now act as distinct siege lanes
+- passive pressure, retaliation differences, recovery payoff, and visible route hints are already live
 
 ### 2. Second Objective Condition Type
 
@@ -76,13 +89,19 @@ Recommended shape:
 
 Why here:
 
-- this is the smallest real proof that objectives are becoming engine features rather than one-off scenario scripts
+- this system is now live, so the remaining work is clearer truth surfacing and better use of the existing condition model in content and UI
 
 Concrete deliverables:
 
-- objective data extension in datapacks
-- reducer-visible completion checks
-- migration/update of current objective handling without breaking `v0.1`
+- better player-facing objective condition visibility
+- cleaner diagnostics and character-side condition summaries
+- any follow-up content should use existing multi-condition objective truth instead of reverting to single-condition assumptions
+
+Current branch status:
+
+- complete for first pass
+- item, boss, and location conditions are all live in content and reducer truth
+- objective state is surfaced in the UI and progress lines already fire when tracked condition truth changes
 
 ### 3. Better Reducer Feedback And Command Legibility
 
@@ -91,8 +110,8 @@ Expand the command surface only where it improves trust and usability.
 Recommended targets:
 
 - clearer rejected-action reasons
-- command aliases for the new gated progression mechanic
-- slightly richer inspect output for locked, unlocked, or gated state
+- command aliases for barricading and any follow-up siege actions
+- richer inspect output for locked, unlocked, barricaded, or pressured state
 
 Why here:
 
@@ -104,15 +123,21 @@ Concrete deliverables:
 - command parser support for the minimal new verbs required
 - updated rolling-summary coverage
 
+Current branch status:
+
+- largely complete for first pass
+- explicit `unlock` targeting, `barricade` aliases, richer inspect output, and state-aware success/failure lines are already live
+- the desktop shell now also recommends likely next commands instead of leaving the player to guess the route verbs cold
+
 ### 4. UI Truth-Surfacing Pass
 
 Reflect the new deterministic rule layer explicitly in the shell.
 
 Recommended targets:
 
-- show locked/unlocked or gated state in map / character / diagnostics surfaces
+- show locked/unlocked and barricaded state in map / character / diagnostics surfaces
 - show utility-item relevance when appropriate
-- make objective status more legible if multiple condition types exist
+- make pressure-reduction state and objective status more legible
 
 Why here:
 
@@ -124,7 +149,30 @@ Concrete deliverables:
 - visible state affordances in the relevant tabs
 - diagnostics visibility for the new state family
 
-### 5. Acceptance Coverage Expansion
+Current branch status:
+
+- complete for first pass
+- map, character, diagnostics, sidebar, and action bar all surface lock state, barricade state, noise state, or route pressure truth
+- the current build also includes lightweight threat forecasts for the exposed siege routes
+
+### 5. Finale Identity Pass
+
+Use one or two authored end-state beats to keep the scenario from flattening at the boss room.
+
+Recommended targets:
+
+- give the garage fight a readable last-phase identity
+- make the objective room feel different once the boss is wounded or cleared
+- keep the finale deterministic and content-specific rather than inventing a generic encounter framework too early
+
+Current branch status:
+
+- first pass complete
+- the `Garage Brute` now enters a wounded end phase at low HP, hits harder, and surfaces explicit finale text
+- garage room text also reflects that wounded-state escalation so the player can read the phase change instead of only inferring it from damage
+- if both `front_verandah` and `back_garden` are barricaded before the garage fight, brute retaliation is reduced by `1` and the sidebar/inspection text surfaces that the property has been secured
+
+### 6. Acceptance Coverage Expansion
 
 Extend automated and manual tests to cover the new mechanic.
 
@@ -133,6 +181,11 @@ Concrete deliverables:
 - reducer tests for the new progression mechanic
 - save/load tests covering the new state field(s)
 - updated acceptance audit and manual sweep docs
+
+Current branch status:
+
+- in progress as documentation sync work
+- automated coverage is already expanded; the remaining cleanup is keeping written acceptance/materials aligned with the current branch
 
 ## Explicit Non-Goals For `v0.2`
 
@@ -151,38 +204,34 @@ Do not pull these in unless they become directly necessary:
 
 ## Recommended Build Order
 
-1. extend datapack schema for the first new deterministic mechanic
-2. extend `RunState`
-3. extend reducer and action parsing
-4. update `Property Siege Classic` content to use the new mechanic
-5. surface the new state in UI derived models and views
-6. add automated tests
-7. update manual sweep and acceptance audit
+1. keep `Property Siege Classic` honest as the first RD Engine testbed
+2. verify current barricade, noise, objective, route-forecast, and finale behavior through docs, tests, and manual sweep
+3. choose the next feature only after deciding whether the pack needs content depth or a new reusable state family
+4. prefer small authored beats over broad abstraction unless the current pack is clearly blocked by missing engine shape
 
-## Best Candidate First Feature
+## Current Decision Point
 
-If we want the cleanest next move, the best `v0.2` starter feature is:
+The previous best continuation feature was:
 
-- make `house_keys` unlock a gated location or progression state
+- make barricades a real two-route siege system rather than a one-room proof
 
-Why this is the best starter:
+Current branch status:
 
-- the content already wants it
-- the player immediately understands it
-- it exercises templates, runtime state, reducer logic, UI feedback, save/load, diagnostics, and acceptance coverage all at once
-- it is rich enough to prove engine growth without creating a system explosion
+- complete for first pass
+- both siege lanes have distinct local payoffs
+- securing both siege lanes now also reduces `Garage Brute` retaliation by `1`
+- the remaining question is whether the next gain should be authored scenario depth or a genuinely new reusable engine capability
 
-## Suggested First Task Stack
+## Suggested Current Task Stack
 
-1. Add deterministic lock state to `RunState`
-2. Add datapack support for locked locations or equivalent gate metadata
-3. Teach the reducer to unlock that gate when the correct item is used
-4. Update `Property Siege Classic` so `house_keys` matter mechanically
-5. Surface the gate in UI and diagnostics
-6. Add tests for locked movement, unlocking, persistence, and objective flow
+1. finish the written doc/manual sync for the secured-property finale payoff
+2. run the refreshed manual sweep against the current branch
+3. decide whether the next gain should be another authored content beat or a genuinely new system family
+4. prefer scenario-specific depth over broad abstraction unless the current pack is clearly blocked by missing engine shape
 
 Current implementation anchor:
 
 - [docs/V0_2_LOCKED_PROGRESSION_SPEC.md](docs/V0_2_LOCKED_PROGRESSION_SPEC.md)
 - [docs/V0_2_OBJECTIVE_CONDITIONS_SPEC.md](docs/V0_2_OBJECTIVE_CONDITIONS_SPEC.md)
 - [docs/V0_2_LOCATION_OBJECTIVE_SPEC.md](docs/V0_2_LOCATION_OBJECTIVE_SPEC.md)
+- [docs/V0_2_BARRICADE_SPEC.md](docs/V0_2_BARRICADE_SPEC.md)

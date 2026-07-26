@@ -8,6 +8,12 @@ Add a third deterministic objective condition family:
 
 This lets objectives demand that the player be at a named location when completion is evaluated.
 
+Status note:
+
+- this mechanic is implemented on the current branch
+- `Property Siege Classic` requires the player to reach `garage` as part of the primary objective
+- reducer, diagnostics, UI, and save/load coverage all treat the location requirement as structured truth
+
 ## Why This Shape
 
 This is the smallest useful expansion after:
@@ -98,3 +104,9 @@ Add coverage for:
 - save/load preserving `required_location_id`
 - objective completion with a location-only requirement
 - combined objective completion where location is the remaining unmet condition
+
+## Current Role In `v0.2`
+
+Location objective conditions are now a completed first-pass foundation.
+
+The next objective work should focus on better use of existing condition families before adding branching, ordered, or scripted objective logic.

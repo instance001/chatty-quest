@@ -2,7 +2,12 @@
 
 ## Purpose
 
-This document fixes the exact shape of the first `v0.2` mechanic before code work begins.
+This document records the exact shape of the first `v0.2` mechanic.
+
+Status note:
+
+- refreshed on `2026-07-16`
+- this mechanic is implemented on the current branch
 
 The goal is not to build a generalized puzzle system.
 
@@ -13,9 +18,9 @@ The goal is to prove one deterministic gated progression beat that:
 - is visible in UI and diagnostics
 - persists through save/load
 
-## First `v0.2` Mechanic
+## Current Implemented Mechanic
 
-`house_keys` unlock the `garage`.
+`house_keys` unlock the `garage` and `back_garden`.
 
 This is the first post-`v0.1` scenario-depth expansion for `Property Siege Classic`.
 
@@ -42,11 +47,12 @@ into:
 
 ## Exact Scenario Change
 
-### Locked Location
+### Locked Locations
 
-Locked location:
+Locked locations:
 
 - `garage`
+- `back_garden`
 
 Initial lock state:
 
@@ -93,58 +99,52 @@ Suggested player-facing line:
 
 ### Unlock Action
 
-First-pass unlock command:
+Current command surface:
 
 - `use house_keys`
+- `unlock <location>`
+- `open <location>`
 
 Valid use context:
 
-- player is at `front_verandah`
+- player is near a reachable matching gate
 - player has `house_keys` in inventory
-- `garage` is still locked
+- the target gate is still locked
 
-Expected reducer result:
+Current reducer result:
 
-- `garage` becomes unlocked
+- the targeted reachable location becomes unlocked
 - state change is durable
 - command succeeds even though the player does not move yet
 
-Suggested player-facing line:
+Current player-facing behavior includes:
 
-- `You unlock the garage.`
+- explicit lock rejection lines on blocked movement
+- explicit targeting when more than one gate matches
+- successful unlock lines such as `You unlock Garage with house keys.`
 
-### Invalid Use Cases
+### Current Invalid Use Cases
 
 If the player uses `house_keys`:
 
 - in the wrong location
 - before picking them up
-- after the garage is already unlocked
+- after the relevant gate is already unlocked
+- when more than one valid nearby gate matches and the target is ambiguous
 
 the reducer should reject the action clearly.
 
-Suggested result lines:
+## Objective Relationship
 
-- `These keys do not help here.`
-- `You do not have that item.`
-- `The garage is already unlocked.`
+The current branch now uses the lock route together with mixed objective conditions:
 
-## Objective Behavior
+- hold `house_keys`
+- reach `garage`
+- defeat `brute_in_garage`
 
-The primary objective does not change in the first pass.
+That follow-up objective work is implemented separately in:
 
-Objective remains:
-
-- reach the garage
-- kill the `Garage Brute`
-
-What changes is the route to objective completion.
-
-This keeps the mechanic isolated:
-
-- one new state family
-- one new deterministic use case
-- no objective-system rewrite yet
+- [docs/V0_2_OBJECTIVE_CONDITIONS_SPEC.md](docs/V0_2_OBJECTIVE_CONDITIONS_SPEC.md)
 
 ## Datapack Shape
 
@@ -206,15 +206,15 @@ Required persistence behavior:
 - a locked garage stays locked after save/load
 - an unlocked garage stays unlocked after save/load
 
-## Tests Required
+## Current Verified Behaviors
 
-Minimum automated coverage:
+Current automated coverage includes:
 
-- generated run starts with garage locked
-- moving to garage while locked fails
-- taking `house_keys` then using them at `front_verandah` unlocks garage
-- unlocked garage remains unlocked after save/load
-- attempting to unlock in the wrong context fails cleanly
+- generated run starts with `garage` and `back_garden` locked
+- moving to a locked target fails cleanly
+- taking `house_keys` then unlocking a reachable target succeeds
+- ambiguous `use house_keys` prompts explicit targeting
+- unlocked gate state survives save/load
 
 ## Explicit Non-Goals
 
@@ -228,12 +228,12 @@ Do not include these in the first locked-progression pass:
 - new objective types
 - broad natural-language unlock parsing
 
-## Implementation Order
+## Current Role In `v0.2`
 
-1. extend datapack schema for locked garage metadata
-2. extend `RunState` for lock truth
-3. add reducer and parser support for unlock behavior
-4. update `Property Siege Classic` content
-5. surface lock state in UI and diagnostics
-6. add tests
-7. update acceptance docs once mechanic is stable
+This mechanic is no longer the active planning frontier.
+
+It is now a completed foundation that supports the next siege-depth work, especially:
+
+- barricade-driven room security
+- clearer route pressure
+- stronger UI truth surfacing around secured versus exposed approaches

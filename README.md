@@ -23,8 +23,9 @@ Current release status:
 - `v0.1` is accepted
 - the desktop `egui/eframe` shell is playable end-to-end
 - datapack discovery, deterministic run generation, reducer actions, `MockNarrator`, media focus, diagnostics, and JSON save/load are all wired and working
-- `cargo test` currently passes with `14` automated tests
-- the live manual sweep passed on `2026-06-11`
+- the current branch also includes `v0.2`-lane siege-depth work for barricades, noise pressure, route forecasting, guided command surfaces, and authored garage-finale payoffs
+- `cargo test` currently passes with `47` automated tests
+- the original `v0.1` live manual sweep passed on `2026-06-11`, and the current branch has refreshed sweep/audit notes dated `2026-07-16`
 
 `v0.1` is focused on one playable scenario pack:
 
@@ -56,9 +57,14 @@ Active run examples:
 
 Release and verification docs:
 
+- [docs/ZERO_KNOWLEDGE_USER_MANUAL.md](docs/ZERO_KNOWLEDGE_USER_MANUAL.md) - zero spoilers
+- [docs/FULL_SPOILERS_USER_MANUAL.md](docs/FULL_SPOILERS_USER_MANUAL.md) - full spoilers
 - [docs/V0_1_RELEASE_NOTES.md](docs/V0_1_RELEASE_NOTES.md)
 - [docs/V0_1_ACCEPTANCE_AUDIT.md](docs/V0_1_ACCEPTANCE_AUDIT.md)
 - [docs/V0_1_MANUAL_SWEEP.md](docs/V0_1_MANUAL_SWEEP.md)
+- [docs/V0_2_MILESTONE_PLAN.md](docs/V0_2_MILESTONE_PLAN.md)
+- [docs/V0_2_BARRICADE_SPEC.md](docs/V0_2_BARRICADE_SPEC.md)
+- [docs/V0_2_NOISE_PRESSURE_SPEC.md](docs/V0_2_NOISE_PRESSURE_SPEC.md)
 
 Media credit:
 
@@ -73,13 +79,13 @@ Core project docs:
 - [docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md)
 - [docs/UI_SHELL_SPEC.md](docs/UI_SHELL_SPEC.md)
 
-Next-planning handoff:
-
-- [docs/V0_2_MILESTONE_PLAN.md](docs/V0_2_MILESTONE_PLAN.md)
-
 Branding art used by the app and docs lives under [`assets/ui/branding/`](assets/ui/branding/).
 
 Captured app screenshots for docs and release use live under [`assets/ui/screenshots/`](assets/ui/screenshots/).
+
+## Related Docs
+
+- [GLOSSARY.md](GLOSSARY.md)
 
 ## License
 
