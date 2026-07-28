@@ -10,7 +10,7 @@ use crate::data::datapacks::{
 use crate::diagnostics::build_diagnostic_report;
 use crate::game::narrator::{MockNarrator, Narrator};
 use crate::game::{
-    ActionOutcome, GameEvent, GeneratedRun, RunState, apply_action, generate_new_run, parse_action,
+    ActionOutcome, GameEvent, GeneratedRun, RunState, apply_action, generate_new_run, parse_command,
 };
 use crate::media::build_media_panel_state;
 use crate::runtime::{current_save_path, current_save_version, load_game, save_game};
@@ -481,13 +481,14 @@ impl ChattyQuestApp {
             return;
         };
 
-        let action = match parse_action(&input) {
-            Ok(action) => action,
+        let parsed_command = match parse_command(&input) {
+            Ok(parsed_command) => parsed_command,
             Err(error) => {
                 self.log_lines.push(error);
                 return;
             }
         };
+        let action = parsed_command.action;
 
         let raw_outcome = apply_action(run, bundle, action.clone());
         self.diagnostic_events

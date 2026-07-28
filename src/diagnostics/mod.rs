@@ -4,6 +4,10 @@ use crate::data::datapacks::{
     DatapackBundle, DatapackCatalog, MediaReferences, resolve_media_assets,
 };
 use crate::game::actions::ItemUseEffect;
+use crate::game::derived::{
+    ObjectiveConditionRowStyle, objective_condition_rows, run_phase_label, security_summary_rows,
+    utility_relevance_rows,
+};
 use crate::game::{GameEvent, RunState};
 
 #[derive(Clone)]
@@ -67,12 +71,15 @@ pub struct InvalidDatapackReport {
 
 #[derive(Clone)]
 pub struct RunHealthReport {
+    pub run_phase: String,
     pub location_id: String,
     pub hp: i32,
     pub max_hp: i32,
     pub noise_level: i32,
     pub objective_complete: bool,
     pub objective_condition_rows: Vec<String>,
+    pub utility_relevance_rows: Vec<String>,
+    pub security_summary_rows: Vec<String>,
     pub inventory_items: usize,
     pub known_locations: usize,
     pub live_enemies: usize,
@@ -167,6 +174,7 @@ pub struct EventCounters {
     pub rejections: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_diagnostic_report(
     datapacks: &DatapackCatalog,
     current_bundle: Option<&DatapackBundle>,
@@ -241,12 +249,19 @@ pub fn build_diagnostic_report(
     let media_asset_report = current_bundle.map(build_media_asset_report);
 
     let run_health = current_run.map(|run| RunHealthReport {
+        run_phase: run_phase_label(run).to_owned(),
         location_id: run.current_location_id.clone(),
         hp: run.hp,
         max_hp: run.max_hp,
         noise_level: run.noise_level,
         objective_complete: run.active_objective.completed,
-        objective_condition_rows: build_objective_condition_rows(run),
+        objective_condition_rows: objective_condition_rows(
+            run,
+            current_bundle,
+            ObjectiveConditionRowStyle::Diagnostic,
+        ),
+        utility_relevance_rows: utility_relevance_rows(run, current_bundle),
+        security_summary_rows: security_summary_rows(run, current_bundle),
         inventory_items: run.inventory.len(),
         known_locations: run.known_locations.len(),
         live_enemies: run.enemies_alive.len(),
@@ -589,52 +604,6 @@ fn format_game_event(event: &GameEvent) -> String {
     }
 }
 
-fn build_objective_condition_rows(run: &RunState) -> Vec<String> {
-    let mut rows = Vec::new();
-
-    if let Some(required_item_id) = &run.active_objective.required_item_id {
-        rows.push(format!(
-            "Objective item '{}': {}",
-            required_item_id,
-            if run
-                .inventory
-                .iter()
-                .any(|item| &item.id == required_item_id)
-            {
-                "held"
-            } else {
-                "missing"
-            }
-        ));
-    }
-
-    if let Some(target_boss_id) = &run.active_objective.target_boss_id {
-        rows.push(format!(
-            "Objective boss '{}': {}",
-            target_boss_id,
-            if run.bosses_defeated.contains(target_boss_id) {
-                "defeated"
-            } else {
-                "alive"
-            }
-        ));
-    }
-
-    if let Some(required_location_id) = &run.active_objective.required_location_id {
-        rows.push(format!(
-            "Objective location '{}': {}",
-            required_location_id,
-            if run.current_location_id == *required_location_id {
-                "reached"
-            } else {
-                "not reached"
-            }
-        ));
-    }
-
-    rows
-}
-
 #[cfg(test)]
 mod tests {
     use crate::data::datapacks::{
@@ -690,7 +659,29 @@ mod tests {
             health
                 .objective_condition_rows
                 .iter()
-                .any(|row| row.contains("house_keys"))
+                .any(|row| row == "Objective item 'House Keys (house_keys)': missing")
+        }));
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health
+                .objective_condition_rows
+                .iter()
+                .any(|row| row == "Objective boss 'Garage Brute (brute_in_garage)': alive")
+        }));
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health
+                .objective_condition_rows
+                .iter()
+                .any(|row| row == "Objective location 'Garage (garage)': not reached")
+        }));
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health.utility_relevance_rows.iter().any(|row| {
+                row == "Utility: Torch (torch) reveals connected exits from the current room."
+            })
+        }));
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health.security_summary_rows.iter().any(|row| {
+                row == "Open approaches: Front Verandah (front_verandah), Back Garden (back_garden)"
+            })
         }));
         assert_eq!(report.event_counters.moves, 1);
         assert_eq!(report.event_counters.items_taken, 1);

@@ -8,8 +8,9 @@ Status note:
 
 - this document was refreshed on `2026-07-16`
 - lock state, key-driven gated progression, mixed objective conditions, the first barricade pass, and the first noise-pressure pass are already implemented on the current branch
-- the current branch also includes clearer player-facing truth surfacing for pressure, route state, and recommended next verbs
+- the current branch also includes clearer player-facing truth surfacing for pressure, route state, objective progress, utility relevance, siege security, and recommended next verbs
 - the current branch now also includes small authored garage-finale wrinkles through the `Garage Brute` wounded end phase and a secured-property payoff when both siege lanes are barricaded before the finale
+- the current branch also now includes explicit command-boundary, narrator-context, bounded rolling-summary, and dry handoff snapshot contracts so future LLM/ecosystem work has to pass through reducer-owned truth
 - the remaining `v0.2` work is now mostly about content depth and selective authored escalation rather than proving those foundations from scratch
 
 `v0.1` proved:
@@ -102,6 +103,7 @@ Current branch status:
 - complete for first pass
 - item, boss, and location conditions are all live in content and reducer truth
 - objective state is surfaced in the UI and progress lines already fire when tracked condition truth changes
+- character and diagnostics condition rows now include datapack display names beside ids, so modders and players can read objective truth without decoding ids alone
 
 ### 3. Better Reducer Feedback And Command Legibility
 
@@ -154,6 +156,9 @@ Current branch status:
 - complete for first pass
 - map, character, diagnostics, sidebar, and action bar all surface lock state, barricade state, noise state, or route pressure truth
 - the current build also includes lightweight threat forecasts for the exposed siege routes
+- character and diagnostics now include utility relevance plus siege security rows, so held utility effects and open/secured approaches are visible without relying on narration
+- the Game sidebar now includes named objective-progress rows, so the main play surface shows item, location, and boss requirements without requiring a tab switch
+- shared derived row builders now live in `src/game/derived.rs`, keeping sidebar, character, and diagnostics wording aligned instead of duplicating the same truth derivation in multiple surfaces
 
 ### 5. Finale Identity Pass
 
@@ -171,6 +176,7 @@ Current branch status:
 - the `Garage Brute` now enters a wounded end phase at low HP, hits harder, and surfaces explicit finale text
 - garage room text also reflects that wounded-state escalation so the player can read the phase change instead of only inferring it from damage
 - if both `front_verandah` and `back_garden` are barricaded before the garage fight, brute retaliation is reduced by `1` and the sidebar/inspection text surfaces that the property has been secured
+- after the objective is complete, the current branch now keeps the run open in an epilogue-friendly mode: exploration and inspection remain available, combat, pressure, and resource mutation are paused, and locations can provide optional datapack-authored `epilogue_description` text plus sidebar/media-surfaced `epilogue_hook` post-credits seeds
 
 ### 6. Acceptance Coverage Expansion
 
@@ -184,8 +190,11 @@ Concrete deliverables:
 
 Current branch status:
 
-- in progress as documentation sync work
-- automated coverage is already expanded; the remaining cleanup is keeping written acceptance/materials aligned with the current branch
+- complete for current branch
+- automated coverage is already expanded
+- clippy passes with warnings denied for all targets and features
+- written acceptance and manual sweep materials were refreshed on `2026-07-28`
+- current-branch live desktop sweep passed on `2026-07-28`
 
 ## Explicit Non-Goals For `v0.2`
 
@@ -224,10 +233,9 @@ Current branch status:
 
 ## Suggested Current Task Stack
 
-1. finish the written doc/manual sync for the secured-property finale payoff
-2. run the refreshed manual sweep against the current branch
-3. decide whether the next gain should be another authored content beat or a genuinely new system family
-4. prefer scenario-specific depth over broad abstraction unless the current pack is clearly blocked by missing engine shape
+1. decide whether the next gain should be another authored content beat or a genuinely new system family
+2. prefer scenario-specific depth over broad abstraction unless the current pack is clearly blocked by missing engine shape
+3. keep any next authored beat deterministic and datapack-visible before any real LLM narrator or live ecosystem bridge work
 
 Current implementation anchor:
 

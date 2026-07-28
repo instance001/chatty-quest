@@ -452,9 +452,17 @@ pub fn show_game_tab(
                                 sidebar.current_location_tags.join(", ")
                             ));
                         }
+                        ui.small(&sidebar.run_phase_line);
                         ui.small(&sidebar.noise_line);
                         ui.small(&sidebar.noise_hint_line);
                         ui.small(&sidebar.suggested_command_line);
+                        if !sidebar.objective_progress_rows.is_empty() {
+                            ui.separator();
+                            ui.label("Objective progress");
+                            for row in &sidebar.objective_progress_rows {
+                                ui.small(row);
+                            }
+                        }
                         for status_line in &sidebar.current_location_status_lines {
                             ui.small(status_line);
                         }
@@ -601,7 +609,7 @@ pub fn show_game_tab(
 
             if !display.future_hook_rows.is_empty() {
                 ui.separator();
-                ui.label("Future hook keys");
+                ui.label("Future media hooks");
                 for row in &display.future_hook_rows {
                     ui.small(row);
                 }
@@ -639,6 +647,9 @@ pub fn show_game_tab(
                 ui.visuals_mut().override_text_color = Some(tone);
                 ui.label(egui::RichText::new(&outcome.label).strong().size(18.0));
                 ui.small(&outcome.detail);
+                if let Some(followup) = &outcome.followup {
+                    ui.small(followup);
+                }
                 ui.visuals_mut().override_text_color = None;
             });
         }
@@ -805,6 +816,7 @@ pub fn show_character_tab(
             ui.label("Character stats");
             ui.separator();
             ui.label(format!("Datapack id: {}", summary.datapack_id));
+            ui.label(format!("Run phase: {}", summary.run_phase));
             ui.label(format!("HP: {} / {}", summary.hp, summary.max_hp));
             ui.label(format!(
                 "Noise: {} ({})",
@@ -829,6 +841,20 @@ pub fn show_character_tab(
             ui.small(&summary.active_objective_description);
             for row in &summary.objective_condition_rows {
                 ui.small(row);
+            }
+            if !summary.utility_relevance_rows.is_empty() {
+                ui.separator();
+                ui.label("Utility relevance");
+                for row in &summary.utility_relevance_rows {
+                    ui.small(row);
+                }
+            }
+            if !summary.security_summary_rows.is_empty() {
+                ui.separator();
+                ui.label("Siege security");
+                for row in &summary.security_summary_rows {
+                    ui.small(row);
+                }
             }
             ui.small(format!(
                 "Enemies defeated: {} | Bosses defeated: {}",

@@ -1,6 +1,6 @@
 # Chatty Quest Full-Spoilers User Manual
 
-Last updated: `2026-07-16`
+Last updated: `2026-07-28`
 
 ## Spoiler Warning
 
@@ -104,6 +104,8 @@ The clearer commands are:
 - `unlock garage`
 - `unlock back_garden`
 
+Bare target verbs such as `unlock`, `go`, `inspect`, or `use` are rejected before the reducer runs. The game asks what target you mean instead of handing that ambiguity to narration.
+
 ## Barricade Targets
 
 The current barricadable locations are:
@@ -169,6 +171,13 @@ If both `Front Verandah` and `Back Garden` are barricaded before the garage figh
 
 - `Garage Brute` retaliation is reduced by `1`
 - the garage forecast and inspection text acknowledge that the exposed property approaches are secured
+
+## Character Truth Rows
+
+The Character tab can now spell out two useful deterministic summaries:
+
+- utility relevance, such as the `Torch` revealing connected exits or the `Barricade Kit` listing remaining barricade targets
+- siege security, including secured approaches, open approaches, finale-security payoff, and whether barricaded rooms can help noise settle
 
 ## Noise, Fully Explained
 
@@ -367,6 +376,21 @@ Before expecting the run to end, make sure:
 
 If one of those is missing, the objective is not complete.
 
+## After You Win
+
+Winning does not immediately close the run.
+
+After `WIN`:
+
+- `look`, `inspect`, open-route movement, save, and load still work
+- the UI reports the run phase as `Epilogue`
+- the win banner explains that aftermath exploration is available
+- the action bar shifts toward epilogue-safe commands
+- rooms can show authored aftermath descriptions when the datapack provides them
+- rooms can also surface small post-credits hooks for future content or media, including sidebar and media-panel cues
+- `attack`, `wait`, `take`, `use`, `unlock`, and `barricade` no longer mutate the main run
+- this keeps room for future datapack-authored post-credits content without letting the completed siege keep damaging or spending resources
+
 ## Recommended Commands By Situation
 
 ### You Just Spawned
@@ -397,6 +421,12 @@ If one of those is missing, the objective is not complete.
 
 - `go garage`
 - `attack`
+
+### You Already Won
+
+- `look`
+- `inspect room`
+- save from the top bar
 
 ## Related Documents
 

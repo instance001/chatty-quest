@@ -320,6 +320,6 @@ These are not omissions by accident. They are deferred so the first release can 
 
 The recommended next planning document is:
 
-- [docs/V0_2_MILESTONE_PLAN.md](c:/Users/User/Desktop/chatty-quest/docs/V0_2_MILESTONE_PLAN.md)
+- [docs/V0_2_MILESTONE_PLAN.md](V0_2_MILESTONE_PLAN.md)
 
 That milestone keeps the project focused on richer deterministic scenario expression before any ecosystem or LLM expansion.

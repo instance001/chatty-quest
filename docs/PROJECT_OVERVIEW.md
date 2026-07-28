@@ -102,7 +102,7 @@ Longer-term, the engine should continue moving toward a clean three-part content
 
 `v0.1` does not need every instance system fully generalized yet, but the future shape should stay visible.
 
-The implementation-facing runtime contract for that split is documented in [RUNTIME_MODEL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/RUNTIME_MODEL_SPEC.md:1).
+The implementation-facing runtime contract for that split is documented in [RUNTIME_MODEL_SPEC.md](RUNTIME_MODEL_SPEC.md).
 
 ## Why `Property Siege Classic` Is First
 

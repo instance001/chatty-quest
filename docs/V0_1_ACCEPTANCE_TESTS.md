@@ -85,6 +85,8 @@ The following should work:
 
 - the game tab includes a chat-style log
 - the player can enter text input
+- raw player text resolves into a structured command before reducer or narrator handling
+- incomplete target commands such as `go`, `inspect`, or `use` are rejected clearly
 - the system produces narrator-style responses through `MockNarrator`
 - narration reflects reducer-confirmed outcomes rather than inventing state
 
@@ -187,6 +189,7 @@ The following should work:
 - objective-related state progresses when the required conditions are met
 - objective completion is driven by structured state rather than narrator prose
 - win or loss is surfaced clearly in UI state as well as narration
+- after a win, the run enters an epilogue-friendly state where exploration and inspection can continue, datapack-authored aftermath room text and post-credits hooks can surface, and combat, pressure, and resource mutation do not keep pretending the main scenario is unresolved
 - guided command or helper surfaces can point toward the next likely objective verb without forcing the player to use them
 
 Pass condition:

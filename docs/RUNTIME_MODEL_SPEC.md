@@ -15,11 +15,11 @@ It exists to answer one practical question clearly:
 
 This is the implementation-facing companion to:
 
-- [ARCHITECTURE.md](c:/Users/User/Desktop/chatty-quest/docs/ARCHITECTURE.md:1)
-- [STATE_AND_BUCKETS.md](c:/Users/User/Desktop/chatty-quest/docs/STATE_AND_BUCKETS.md:1)
-- [DATAPACK_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/DATAPACK_SPEC.md:1)
-- [REDUCER_RESULT_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/REDUCER_RESULT_SPEC.md:1)
-- [INSTANCE_MIGRATION_PLAN.md](c:/Users/User/Desktop/chatty-quest/docs/INSTANCE_MIGRATION_PLAN.md:1)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [STATE_AND_BUCKETS.md](STATE_AND_BUCKETS.md)
+- [DATAPACK_SPEC.md](DATAPACK_SPEC.md)
+- [REDUCER_RESULT_SPEC.md](REDUCER_RESULT_SPEC.md)
+- [INSTANCE_MIGRATION_PLAN.md](INSTANCE_MIGRATION_PLAN.md)
 
 ## Doctrine
 

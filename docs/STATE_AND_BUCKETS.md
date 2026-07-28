@@ -132,6 +132,8 @@ Practical rule:
 - if it affects future mechanics, bucket it
 - if it only affects future tone or recognition, summarize it
 
+The current rolling-summary implementation contract is documented in [ROLLING_SUMMARY_SPEC.md](ROLLING_SUMMARY_SPEC.md).
+
 ## Pending Changes And Confirmed Changes
 
 Not every narrated possibility should automatically become fact.

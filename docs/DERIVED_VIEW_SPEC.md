@@ -15,11 +15,11 @@ Short answer:
 
 This document should be read alongside:
 
-- [RUNTIME_MODEL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/RUNTIME_MODEL_SPEC.md:1)
-- [REDUCER_RESULT_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/REDUCER_RESULT_SPEC.md:1)
-- [UI_SHELL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/UI_SHELL_SPEC.md:1)
-- [MEDIA_PANEL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/MEDIA_PANEL_SPEC.md:1)
-- [MAP_SYSTEM_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/MAP_SYSTEM_SPEC.md:1)
+- [RUNTIME_MODEL_SPEC.md](RUNTIME_MODEL_SPEC.md)
+- [REDUCER_RESULT_SPEC.md](REDUCER_RESULT_SPEC.md)
+- [UI_SHELL_SPEC.md](UI_SHELL_SPEC.md)
+- [MEDIA_PANEL_SPEC.md](MEDIA_PANEL_SPEC.md)
+- [MAP_SYSTEM_SPEC.md](MAP_SYSTEM_SPEC.md)
 
 ## Core Rule
 
@@ -99,8 +99,15 @@ Examples:
 - `MediaPanelState`
 - inventory row models
 - diagnostics report structs
+- shared game-derived truth rows such as objective progress, utility relevance, and siege security
 
 This layer should be rebuildable.
+
+Current implementation note:
+
+- shared row builders and cross-surface labels that feed more than one surface live under `src/game/derived.rs`
+- widget-specific models still live under their owning UI or diagnostics modules
+- this keeps repeated player-facing truth wording from drifting between the Game sidebar, Character tab, Diagnostics report, narrator context, and handoff snapshots
 
 ### 3. Widget Or Transport Surface
 

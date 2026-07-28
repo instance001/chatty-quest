@@ -6,6 +6,7 @@ Refresh note:
 
 - refreshed on `2026-07-16` for the current post-`v0.1` branch
 - this sweep now includes barricade-state, noise-state, guided-command, and siege-route forecast checks
+- refreshed again on `2026-07-28` to include epilogue, narrator-context, and command-boundary checks
 
 Goal:
 
@@ -23,6 +24,8 @@ Estimated time: `5-10 minutes`
 
 Expected baseline:
 
+- `cargo test` passes with `67` automated tests
+- `cargo clippy --all-targets --all-features -- -D warnings` passes
 - `Property Siege Classic` is the selected datapack
 - setup screen is visible
 - no crash on launch
@@ -65,6 +68,7 @@ Pass if:
 
 Action:
 
+- type a bare target verb such as `go`, `inspect`, or `use`
 - from `Front Verandah`, use the `Torch`
 - move from `Front Verandah` to `Kitchen`
 - try `go garage` from `Front Verandah` before unlocking it
@@ -72,11 +76,12 @@ Action:
 
 Check:
 
+- bare target verbs are rejected clearly before any reducer or narrator outcome is produced
 - using the torch reveals connected routes without moving the player
 - valid movement updates the current location in the map panel
 - the chat log reflects the move
 - the sidebar now surfaces room-role hints for major spaces such as `Front Verandah`, `Back Garden`, and `Garage`
-- the sidebar also surfaces a suggested next command and a readable threat forecast where relevant
+- the sidebar also surfaces objective progress, a suggested next command, and a readable threat forecast where relevant
 - locked movement is rejected with the garage-lock response
 - invalid movement is rejected with the boundary response
 - connected exits update truthfully after movement
@@ -186,18 +191,25 @@ Check:
 - if `Back Garden` was barricaded earlier, the UI continues to report it as barricaded
 - if `Garage` is the next meaningful move, the suggested command surface points at it once the route is open
 - if both `Front Verandah` and `Back Garden` were barricaded before entering the `Garage`, the forecast or inspection text acknowledges the secured-property payoff
-- the objective condition lines show `house_keys` held before the boss dies
+- the objective condition lines show `House Keys (house_keys)` held before the boss dies
 - torch-driven reveal behavior never invents movement or objective progress by itself
 - objective progress lines surface when `house_keys` is acquired and when the boss condition completes
 - attack updates the log and HP
 - enemy/boss threat state updates in the UI
 - the objective remains visible before completion
 - `WIN` appears clearly in UI when the brute dies
+- `Run phase: Epilogue` appears in the sidebar, character tab, or diagnostics surfaces after the win
+- the win banner explains that aftermath exploration is available
+- after `WIN`, the action bar calms down to epilogue-safe suggestions such as `look` and `help`
+- after `WIN`, `attack` or `wait` returns a clear epilogue line instead of changing HP, noise, or combat state
+- after `WIN`, looking, inspecting, moving through open routes, saving, and loading remain possible
+- after `WIN`, `look` or `inspect room` can surface authored aftermath hooks without creating new mechanics
 - narration still feels flavorful without contradicting the result
+- narrator output stays grounded in the structured action outcome rather than interpreting raw typed command text directly
 
 Pass if:
 
-- the scenario can be completed through ordinary play and the UI recognizes the win cleanly
+- the scenario can be completed through ordinary play, the UI recognizes the win cleanly, and the aftermath stays explorable without continuing the main danger loop
 
 ### 8. Media Panel
 
@@ -254,6 +266,7 @@ Check:
 - lock-state truth is visible and understandable
 - barricade-state truth is visible and understandable
 - noise truth is visible and understandable
+- run phase truth is visible and switches to `Epilogue` after a completed objective
 - missing media warnings are understandable rather than cryptic
 - recent events and counters make sense relative to what you just did
 
@@ -275,3 +288,9 @@ Treat the sweep as failed if any of the following happens:
 ## Finish
 
 If every section above passes, record the current branch sweep result in the acceptance audit or release notes without changing the historical `v0.1` acceptance date.
+
+Current note:
+
+- this runbook is current as of `2026-07-28`
+- current-branch live desktop sweep passed on `2026-07-28`
+- supporting screenshot: `C:/Users/User/Pictures/Screenshots/Screenshot 2026-07-28 114747.png`

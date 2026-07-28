@@ -18,10 +18,10 @@ It does not authorize live handoff behavior in `v0.1`.
 
 This document should be read alongside:
 
-- [HANDOFF_LANES.md](c:/Users/User/Desktop/chatty-quest/docs/HANDOFF_LANES.md:1)
-- [RUNTIME_MODEL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/RUNTIME_MODEL_SPEC.md:1)
-- [REDUCER_RESULT_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/REDUCER_RESULT_SPEC.md:1)
-- [INSTANCE_MIGRATION_PLAN.md](c:/Users/User/Desktop/chatty-quest/docs/INSTANCE_MIGRATION_PLAN.md:1)
+- [HANDOFF_LANES.md](HANDOFF_LANES.md)
+- [RUNTIME_MODEL_SPEC.md](RUNTIME_MODEL_SPEC.md)
+- [REDUCER_RESULT_SPEC.md](REDUCER_RESULT_SPEC.md)
+- [INSTANCE_MIGRATION_PLAN.md](INSTANCE_MIGRATION_PLAN.md)
 
 ## Core Rule
 
@@ -41,6 +41,8 @@ loose departments, strict handoff contracts
 ## `v0.1` Rule
 
 `v0.1` does not implement live payload export or import.
+
+The current branch includes an in-process dry-contract snapshot builder in `src/handoff/mod.rs`. It proves packet shape and bounded truth packaging without writing packets, syncing folders, or granting remote authority.
 
 What `v0.1` does allow:
 
@@ -572,12 +574,13 @@ Worse:
 
 ## `v0.1` Guidance
 
-For `v0.1`, the correct move is documentation only.
+For `v0.1`, the correct move is documentation plus dry in-process shape validation.
 
 That means:
 
 - no active bridge code
+- no automatic packet writing
 - no hidden sync assumptions
 - no packet writers running in the background
 
-The value right now is having a clean contract ready before future integration work begins.
+The value right now is having a clean contract ready before future integration work begins, with tests proving that a run snapshot can be built from reducer-confirmed local truth.

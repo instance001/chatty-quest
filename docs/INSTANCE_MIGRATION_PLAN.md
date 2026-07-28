@@ -16,9 +16,9 @@ The goal is to make sure future growth happens through a controlled migration pa
 
 This document should be read alongside:
 
-- [RUNTIME_MODEL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/RUNTIME_MODEL_SPEC.md:1)
-- [REDUCER_RESULT_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/REDUCER_RESULT_SPEC.md:1)
-- [ARCHITECTURE.md](c:/Users/User/Desktop/chatty-quest/docs/ARCHITECTURE.md:1)
+- [RUNTIME_MODEL_SPEC.md](RUNTIME_MODEL_SPEC.md)
+- [REDUCER_RESULT_SPEC.md](REDUCER_RESULT_SPEC.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Current State
 

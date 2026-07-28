@@ -149,6 +149,8 @@ Common fields should include:
 - `id`
 - `name`
 - `description`
+- optional `epilogue_description`
+- optional `epilogue_hook`
 - `narrator_brief` where useful
 - `tags`
 - optional media references
@@ -173,6 +175,8 @@ Suggested location fields:
 - unique `id`
 - display `name`
 - short `description`
+- optional `epilogue_description` for post-win room reads
+- optional `epilogue_hook` for post-win future content/media seeds
 - `narrator_brief`
 - `tags`
 - connection hints or allowed connection IDs
@@ -184,6 +188,14 @@ Suggested location fields:
 - optional context-aware media overrides later
 
 For `v0.1`, the map may be authored or semi-authored. Even so, location data should live in templates rather than being buried in UI code.
+
+Current post-`v0.1` branch note:
+
+- if `epilogue_description` is present, the game uses it for that room after the active objective is complete
+- if `epilogue_hook` is present, the game surfaces it as an aftermath hook after objective completion and exposes a future media hook key for that location
+- this is presentation content for aftermath exploration, not a hidden objective or reducer rule
+- blank `epilogue_description` values are rejected during datapack validation
+- blank `epilogue_hook` values are rejected during datapack validation
 
 ## Item Templates
 

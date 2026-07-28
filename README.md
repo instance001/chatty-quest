@@ -24,8 +24,9 @@ Current release status:
 - the desktop `egui/eframe` shell is playable end-to-end
 - datapack discovery, deterministic run generation, reducer actions, `MockNarrator`, media focus, diagnostics, and JSON save/load are all wired and working
 - the current branch also includes `v0.2`-lane siege-depth work for barricades, noise pressure, route forecasting, guided command surfaces, and authored garage-finale payoffs
-- `cargo test` currently passes with `47` automated tests
-- the original `v0.1` live manual sweep passed on `2026-06-11`, and the current branch has refreshed sweep/audit notes dated `2026-07-16`
+- `cargo test` currently passes with `67` automated tests
+- `cargo clippy --all-targets --all-features -- -D warnings` passes
+- the original `v0.1` live manual sweep passed on `2026-06-11`, and the current branch has refreshed sweep/audit notes dated `2026-07-28`
 
 `v0.1` is focused on one playable scenario pack:
 
@@ -38,6 +39,32 @@ The goal is to prove:
 - reducer-owned game truth
 - a replaceable narrator seam
 - save/load reliability
+
+## RD Engine Loop Map
+
+```mermaid
+flowchart TB
+    datapack["Datapack templates<br/>locations, items, enemies, bosses, objectives"] --> runGen["Run generation<br/>scenario rules + starting buckets"]
+    runGen --> state["Runtime state<br/>canonical game truth"]
+
+    player["Player command<br/>chat-forward adventure input"] --> reducer["Reducer<br/>validates and mutates truth"]
+    state --> reducer
+    reducer --> rejected["Rejected action<br/>clear reason, no hidden mutation"]
+    rejected --> ui["UI shell<br/>visible proof surfaces"]
+
+    reducer --> result["Reducer result<br/>events, log lines, media focus, diagnostics data"]
+    result --> state
+    result --> narrator["Narrator seam<br/>MockNarrator now, future LLM later"]
+    narrator --> prose["DM-style prose<br/>flavor over confirmed facts"]
+
+    state --> derived["Derived views<br/>map, inventory, character, diagnostics, media panel"]
+    derived --> ui
+    prose --> ui
+    ui --> player
+
+    state --> save["JSON save/load<br/>structured state, not prose truth"]
+    save --> state
+```
 
 ## Screenshot Tour
 
@@ -76,6 +103,9 @@ Core project docs:
 - [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md)
 - [docs/RD_ENGINE_PRINCIPLES.md](docs/RD_ENGINE_PRINCIPLES.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/COMMAND_BOUNDARY_SPEC.md](docs/COMMAND_BOUNDARY_SPEC.md)
+- [docs/NARRATOR_CONTEXT_SPEC.md](docs/NARRATOR_CONTEXT_SPEC.md)
+- [docs/ROLLING_SUMMARY_SPEC.md](docs/ROLLING_SUMMARY_SPEC.md)
 - [docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md)
 - [docs/UI_SHELL_SPEC.md](docs/UI_SHELL_SPEC.md)
 

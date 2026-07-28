@@ -9,11 +9,19 @@ use super::queries::{
 };
 use super::state::{InventoryEntry, RunState};
 
+const ROLLING_SUMMARY_LIMIT: usize = 24;
+
 pub fn apply_action(
     state: &mut RunState,
     bundle: &DatapackBundle,
     action: GameAction,
 ) -> ActionOutcome {
+    if state.active_objective.completed {
+        let outcome = apply_epilogue_action(state, bundle, action);
+        append_rolling_summary(state, &outcome);
+        return outcome;
+    }
+
     let was_alive = state.hp > 0;
     let action_for_noise = action.clone();
     let objective_before = objective_condition_statuses(state);
@@ -67,11 +75,64 @@ pub fn apply_action(
         outcome.lines.push("You lose.".to_owned());
     }
 
-    let summary_lines = rolling_summary_lines(&outcome.events, &outcome.lines);
-    state.rolling_summary.extend(summary_lines);
+    append_rolling_summary(state, &outcome);
     ActionOutcome {
         events: outcome.events,
         lines: outcome.lines,
+    }
+}
+
+fn apply_epilogue_action(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    action: GameAction,
+) -> ActionOutcome {
+    match action {
+        GameAction::Help => ActionOutcome {
+            events: vec![GameEvent::HelpShown],
+            lines: vec![
+                "Epilogue commands: help, look, go <location>, inspect <thing>, equip <item>. Save and load remain available from the top bar."
+                    .to_owned(),
+                "The run is won, but the scenario can still be explored for aftermath, screenshots, and future datapack epilogue content."
+                    .to_owned(),
+            ],
+        },
+        GameAction::Look => ActionOutcome {
+            events: vec![GameEvent::LocationLooked {
+                location_id: state.current_location_id.clone(),
+            }],
+            lines: describe_current_location(state, bundle),
+        },
+        GameAction::Move { destination } => handle_move(state, bundle, &destination),
+        GameAction::Inspect { target } => handle_inspect(state, bundle, &target),
+        GameAction::Equip { item_name } => handle_equip(state, &item_name),
+        GameAction::Attack => epilogue_rejection(
+            "The run is already won. There is nothing left here that needs killing.",
+        ),
+        GameAction::Wait => epilogue_rejection(
+            "The run is already won. You can linger, but the siege clock is no longer spending your HP.",
+        ),
+        GameAction::Take { .. } => epilogue_rejection(
+            "The run is already won. Loot changes are paused for the epilogue pass.",
+        ),
+        GameAction::Use { .. } => epilogue_rejection(
+            "The run is already won. Consumable and utility effects are paused for the epilogue pass.",
+        ),
+        GameAction::Unlock { .. } => epilogue_rejection(
+            "The run is already won. Gate changes are paused for the epilogue pass.",
+        ),
+        GameAction::Barricade { .. } => epilogue_rejection(
+            "The run is already won. Barricade changes are paused for the epilogue pass.",
+        ),
+    }
+}
+
+fn epilogue_rejection(line: &str) -> ActionOutcome {
+    ActionOutcome {
+        events: vec![GameEvent::ActionRejected {
+            reason: line.to_owned(),
+        }],
+        lines: vec![line.to_owned()],
     }
 }
 
@@ -1287,6 +1348,19 @@ fn rolling_summary_lines(events: &[GameEvent], fallback_lines: &[String]) -> Vec
     lines
 }
 
+fn append_rolling_summary(state: &mut RunState, outcome: &ActionOutcome) {
+    let summary_lines = rolling_summary_lines(&outcome.events, &outcome.lines);
+    state.rolling_summary.extend(summary_lines);
+    trim_rolling_summary(&mut state.rolling_summary);
+}
+
+fn trim_rolling_summary(summary: &mut Vec<String>) {
+    if summary.len() > ROLLING_SUMMARY_LIMIT {
+        let remove_count = summary.len() - ROLLING_SUMMARY_LIMIT;
+        summary.drain(0..remove_count);
+    }
+}
+
 fn summarize_event(event: &GameEvent) -> Option<String> {
     match event {
         GameEvent::HelpShown => Some("Help was shown.".to_owned()),
@@ -1370,7 +1444,7 @@ mod tests {
     use crate::game::actions::{EncounterKind, GameAction, GameEvent, ItemUseEffect};
     use crate::game::generation::generate_new_run;
 
-    use super::apply_action;
+    use super::{ROLLING_SUMMARY_LIMIT, apply_action};
 
     #[test]
     fn invalid_movement_is_blocked_by_boundary_rules() {
@@ -3067,5 +3141,105 @@ mod tests {
             line == "Objective progress: Reach location 'garage' is now complete."
         }));
         assert!(outcome.lines.iter().any(|line| line == "You win."));
+    }
+
+    #[test]
+    fn epilogue_mode_blocks_combat_and_pressure_without_blocking_exploration() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.active_objective.completed = true;
+        state.current_location_id = "garage".to_owned();
+        state.locked_locations.remove("garage");
+        state.noise_level = 3;
+        state.hp = 5;
+
+        let attack = apply_action(&mut state, &bundle, GameAction::Attack);
+        assert_eq!(state.hp, 5);
+        assert_eq!(state.noise_level, 3);
+        assert!(attack.events.iter().any(|event| matches!(
+            event,
+            GameEvent::ActionRejected { reason } if reason.contains("already won")
+        )));
+
+        let wait = apply_action(&mut state, &bundle, GameAction::Wait);
+        assert_eq!(state.hp, 5);
+        assert_eq!(state.noise_level, 3);
+        assert!(
+            wait.lines
+                .iter()
+                .any(|line| line.contains("siege clock is no longer spending your HP"))
+        );
+
+        let look = apply_action(&mut state, &bundle, GameAction::Look);
+        assert!(look.events.iter().any(|event| matches!(
+            event,
+            GameEvent::LocationLooked { location_id } if location_id == "garage"
+        )));
+        assert!(
+            look.lines
+                .iter()
+                .any(|line| line.contains("finally gives up being an arena"))
+        );
+        assert!(
+            look.lines
+                .iter()
+                .any(|line| line.contains("Aftermath hook: Post-credits hook"))
+        );
+
+        let move_out = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "front_verandah".to_owned(),
+            },
+        );
+        assert_eq!(state.current_location_id, "front_verandah");
+        assert!(move_out.events.iter().any(|event| matches!(
+            event,
+            GameEvent::Moved {
+                to_location_id, ..
+            } if to_location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn rolling_summary_is_bounded_and_event_confirmed() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        for _ in 0..(ROLLING_SUMMARY_LIMIT + 8) {
+            apply_action(&mut state, &bundle, GameAction::Look);
+        }
+
+        assert_eq!(state.rolling_summary.len(), ROLLING_SUMMARY_LIMIT);
+        assert!(
+            state
+                .rolling_summary
+                .iter()
+                .all(|line| line == "Looked around location 'front_verandah'.")
+        );
+    }
+
+    #[test]
+    fn rolling_summary_records_epilogue_actions_without_reopening_danger() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.active_objective.completed = true;
+        state.hp = 5;
+        state.noise_level = 3;
+
+        apply_action(&mut state, &bundle, GameAction::Wait);
+
+        assert_eq!(state.hp, 5);
+        assert_eq!(state.noise_level, 3);
+        assert!(
+            state
+                .rolling_summary
+                .iter()
+                .any(|line| { line.contains("Action rejected: The run is already won") })
+        );
     }
 }

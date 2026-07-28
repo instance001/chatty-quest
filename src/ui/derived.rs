@@ -2,7 +2,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::data::datapacks::DatapackBundle;
 use crate::diagnostics::DiagnosticReport;
-use crate::game::RunState;
+use crate::game::derived::{
+    ObjectiveConditionRowStyle, objective_condition_rows, run_phase_label, security_summary_rows,
+    utility_relevance_rows,
+};
+use crate::game::{RunState, location_description_for_state};
 use crate::media::{MediaPanelState, resolve_location_tile_image, resolve_primary_image};
 use crate::ui::views::{AssetViewerRequest, GeneratedMapLayout, MapTileLayout};
 
@@ -25,6 +29,7 @@ pub struct InventoryRowModel {
 #[derive(Clone)]
 pub struct CharacterSummaryModel {
     pub datapack_id: String,
+    pub run_phase: String,
     pub hp: i32,
     pub max_hp: i32,
     pub noise_level: i32,
@@ -35,6 +40,8 @@ pub struct CharacterSummaryModel {
     pub active_objective_id: String,
     pub active_objective_description: String,
     pub objective_condition_rows: Vec<String>,
+    pub utility_relevance_rows: Vec<String>,
+    pub security_summary_rows: Vec<String>,
     pub enemies_defeated: usize,
     pub bosses_defeated: usize,
     pub locked_locations: Vec<String>,
@@ -83,9 +90,11 @@ pub struct GameSidebarModel {
     pub current_location_name: String,
     pub current_location_description: String,
     pub current_location_tags: Vec<String>,
+    pub run_phase_line: String,
     pub noise_line: String,
     pub noise_hint_line: String,
     pub suggested_command_line: String,
+    pub objective_progress_rows: Vec<String>,
     pub current_location_status_lines: Vec<String>,
     pub connected_exits: Vec<ExitRowModel>,
     pub local_item_count: usize,
@@ -201,6 +210,7 @@ pub struct AssetViewerChromeModel {
 pub struct OutcomeBannerModel {
     pub label: String,
     pub detail: String,
+    pub followup: Option<String>,
 }
 
 #[derive(Clone)]
@@ -287,6 +297,10 @@ pub fn build_game_header_chips(run: Option<&RunState>, chaos_mode: f32) -> Vec<S
             value: format!("{} / {}", run.hp, run.max_hp),
         });
         chips.push(StatusChipModel {
+            label: "Phase".to_owned(),
+            value: run_phase_label(run).to_owned(),
+        });
+        chips.push(StatusChipModel {
             label: "Noise".to_owned(),
             value: noise_label(run.noise_level).to_owned(),
         });
@@ -319,11 +333,16 @@ pub fn build_outcome_banner(run: Option<&RunState>) -> Option<OutcomeBannerModel
         Some(OutcomeBannerModel {
             label: "LOSS".to_owned(),
             detail: "The player has been reduced to 0 HP.".to_owned(),
+            followup: None,
         })
     } else if run.active_objective.completed {
         Some(OutcomeBannerModel {
             label: "WIN".to_owned(),
             detail: "The run objective has been completed.".to_owned(),
+            followup: Some(
+                "Aftermath exploration is available. Look around, inspect the scene, or save from the top bar."
+                    .to_owned(),
+            ),
         })
     } else {
         None
@@ -353,6 +372,7 @@ pub fn build_character_summary(
 
     CharacterSummaryModel {
         datapack_id: run.datapack_id.clone(),
+        run_phase: run_phase_label(run).to_owned(),
         hp: run.hp,
         max_hp: run.max_hp,
         noise_level: run.noise_level,
@@ -362,7 +382,13 @@ pub fn build_character_summary(
         objective_complete: run.active_objective.completed,
         active_objective_id: run.active_objective.id.clone(),
         active_objective_description: run.active_objective.description.clone(),
-        objective_condition_rows: build_objective_condition_rows(run),
+        objective_condition_rows: objective_condition_rows(
+            run,
+            bundle,
+            ObjectiveConditionRowStyle::Requirement,
+        ),
+        utility_relevance_rows: utility_relevance_rows(run, bundle),
+        security_summary_rows: security_summary_rows(run, bundle),
         enemies_defeated: run.enemies_defeated.len(),
         bosses_defeated: run.bosses_defeated.len(),
         locked_locations: {
@@ -493,16 +519,28 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
         current_location_status_lines
             .push("Objective: this room satisfies the location requirement".to_owned());
     }
+    if run.active_objective.completed
+        && let Some(epilogue_hook) = current_location.epilogue_hook.as_deref()
+    {
+        current_location_status_lines.push(format!("Aftermath hook: {}", epilogue_hook));
+    }
 
     Some(GameSidebarModel {
         current_location_name: current_location.name.clone(),
-        current_location_description: current_location.description.clone(),
+        current_location_description: location_description_for_state(run, current_location)
+            .to_owned(),
         current_location_tags: current_location.tags.clone(),
+        run_phase_line: format!("Run phase: {}", run_phase_label(run)),
         noise_line: format!("Noise: {}", noise_label(run.noise_level)),
         noise_hint_line: noise_hint_line(run.noise_level).to_owned(),
         suggested_command_line: format!(
             "Suggested next command: {}",
             recommended_command(run, bundle)
+        ),
+        objective_progress_rows: objective_condition_rows(
+            run,
+            Some(bundle),
+            ObjectiveConditionRowStyle::Requirement,
         ),
         current_location_status_lines,
         connected_exits,
@@ -646,6 +684,7 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
 
     let run_health_rows = report.run_health.as_ref().map_or_else(Vec::new, |run| {
         let mut rows = vec![
+            format!("Run phase: {}", run.run_phase),
             format!("Location: {}", run.location_id),
             format!("HP: {} / {}", run.hp, run.max_hp),
             format!(
@@ -679,13 +718,10 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
                     run.barricaded_locations.join(", ")
                 }
             ),
-            format!(
-                "Noise: {} ({})",
-                run.noise_level,
-                noise_label(run.noise_level)
-            ),
         ];
         rows.extend(run.objective_condition_rows.iter().cloned());
+        rows.extend(run.utility_relevance_rows.iter().cloned());
+        rows.extend(run.security_summary_rows.iter().cloned());
         rows
     });
 
@@ -825,9 +861,17 @@ pub fn build_media_panel_display(media_panel: &MediaPanelState) -> MediaPanelDis
             .future_hook_keys
             .iter()
             .take(6)
-            .cloned()
+            .map(|key| display_future_hook_key(key))
             .collect(),
         encounter_snapshot_rows: media_panel.encounter_snapshot.clone(),
+    }
+}
+
+fn display_future_hook_key(key: &str) -> String {
+    if let Some(location_id) = key.strip_prefix("epilogue_hook:") {
+        format!("Aftermath media hook: {}", location_id)
+    } else {
+        key.to_owned()
     }
 }
 
@@ -1361,13 +1405,10 @@ fn choose_location_position(
     base_y: i32,
     seed: usize,
 ) -> Option<(i32, i32)> {
-    let Some(target_location) = bundle
+    let target_location = bundle
         .locations
         .iter()
-        .find(|location| location.id == target_location_id)
-    else {
-        return None;
-    };
+        .find(|location| location.id == target_location_id)?;
 
     let mut candidates = Vec::new();
 
@@ -1542,46 +1583,6 @@ fn tile_visibility_under_fog(
     }
 }
 
-fn build_objective_condition_rows(run: &RunState) -> Vec<String> {
-    let mut rows = Vec::new();
-
-    if let Some(required_item_id) = &run.active_objective.required_item_id {
-        let held = run
-            .inventory
-            .iter()
-            .any(|item| &item.id == required_item_id);
-        rows.push(format!(
-            "Requires item '{}': {}",
-            required_item_id,
-            if held { "held" } else { "missing" }
-        ));
-    }
-
-    if let Some(target_boss_id) = &run.active_objective.target_boss_id {
-        let defeated = run.bosses_defeated.contains(target_boss_id);
-        rows.push(format!(
-            "Requires boss '{}': {}",
-            target_boss_id,
-            if defeated { "defeated" } else { "alive" }
-        ));
-    }
-
-    if let Some(required_location_id) = &run.active_objective.required_location_id {
-        let at_location = run.current_location_id == *required_location_id;
-        rows.push(format!(
-            "Requires location '{}': {}",
-            required_location_id,
-            if at_location {
-                "reached"
-            } else {
-                "not reached"
-            }
-        ));
-    }
-
-    rows
-}
-
 fn route_note_for_location(location: &crate::data::datapacks::LocationTemplate) -> Option<String> {
     match location.id.as_str() {
         "front_verandah" => Some("threshold defense against front-gate pressure".to_owned()),
@@ -1685,6 +1686,10 @@ fn noise_hint_line(level: i32) -> &'static str {
 fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<ActionButtonModel> {
     let mut actions = Vec::new();
     push_action(&mut actions, "Look", "look");
+    if run.active_objective.completed {
+        push_action(&mut actions, "Help", "help");
+        return actions;
+    }
 
     if let Some(location) = bundle
         .locations
@@ -1773,6 +1778,10 @@ fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<Ac
 }
 
 fn recommended_command(run: &RunState, bundle: &DatapackBundle) -> String {
+    if run.active_objective.completed {
+        return "look".to_owned();
+    }
+
     let Some(location) = bundle
         .locations
         .iter()
@@ -1864,7 +1873,10 @@ mod tests {
     use crate::data::datapacks::load_datapack_bundle_by_folder;
     use crate::game::generation::generate_new_run;
 
-    use super::{build_game_action_bar, build_game_sidebar};
+    use super::{
+        build_character_summary, build_diagnostics_summary, build_game_action_bar,
+        build_game_header_chips, build_game_sidebar, build_outcome_banner,
+    };
 
     #[test]
     fn action_bar_recommends_take_for_local_loot_early() {
@@ -1920,6 +1932,102 @@ mod tests {
     }
 
     #[test]
+    fn character_summary_names_objective_condition_targets() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let run = generate_new_run(&bundle).state;
+
+        let summary = build_character_summary(&run, Some(&bundle));
+
+        assert!(
+            summary
+                .objective_condition_rows
+                .iter()
+                .any(|row| { row == "Requires item 'House Keys (house_keys)': missing" })
+        );
+        assert!(
+            summary
+                .objective_condition_rows
+                .iter()
+                .any(|row| { row == "Requires boss 'Garage Brute (brute_in_garage)': alive" })
+        );
+        assert!(
+            summary
+                .objective_condition_rows
+                .iter()
+                .any(|row| { row == "Requires location 'Garage (garage)': not reached" })
+        );
+    }
+
+    #[test]
+    fn sidebar_surfaces_named_objective_progress_rows() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let run = generate_new_run(&bundle).state;
+
+        let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+
+        assert!(
+            sidebar
+                .objective_progress_rows
+                .iter()
+                .any(|row| { row == "Requires item 'House Keys (house_keys)': missing" })
+        );
+        assert!(
+            sidebar
+                .objective_progress_rows
+                .iter()
+                .any(|row| { row == "Requires boss 'Garage Brute (brute_in_garage)': alive" })
+        );
+        assert!(
+            sidebar
+                .objective_progress_rows
+                .iter()
+                .any(|row| { row == "Requires location 'Garage (garage)': not reached" })
+        );
+    }
+
+    #[test]
+    fn character_summary_surfaces_utility_and_security_truth() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.inventory.push(crate::game::state::InventoryEntry {
+            id: "barricade_kit".to_owned(),
+            name: "Barricade Kit".to_owned(),
+            description: "test".to_owned(),
+            damage: 0,
+        });
+        run.barricaded_locations.insert("front_verandah".to_owned());
+
+        let summary = build_character_summary(&run, Some(&bundle));
+
+        assert!(summary.utility_relevance_rows.iter().any(|row| {
+            row == "Utility: Torch (torch) reveals connected exits from the current room."
+        }));
+        assert!(summary.utility_relevance_rows.iter().any(|row| {
+            row == "Utility: Barricade Kit (barricade_kit) can secure Back Garden (back_garden)."
+        }));
+        assert!(
+            summary
+                .security_summary_rows
+                .iter()
+                .any(|row| { row == "Secured approaches: Front Verandah (front_verandah)" })
+        );
+        assert!(
+            summary
+                .security_summary_rows
+                .iter()
+                .any(|row| { row == "Open approaches: Back Garden (back_garden)" })
+        );
+        assert!(
+            summary.security_summary_rows.iter().any(|row| {
+                row == "Noise recovery: waiting in a barricaded room can lower noise."
+            })
+        );
+    }
+
+    #[test]
     fn sidebar_surfaces_threat_forecast_for_exposed_and_secured_routes() {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
@@ -1968,5 +2076,160 @@ mod tests {
         assert!(sidebar.current_location_status_lines.iter().any(|line| {
             line.contains("both siege lanes are secured; brute retaliation is reduced")
         }));
+    }
+
+    #[test]
+    fn action_bar_switches_to_epilogue_suggestions_after_win() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.active_objective.completed = true;
+        run.current_location_id = "garage".to_owned();
+        run.locked_locations.remove("garage");
+
+        let action_bar = build_game_action_bar(Some(&run), Some(&bundle));
+
+        assert_eq!(action_bar.command_hint, "Try: look");
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "look")
+        );
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "help")
+        );
+        assert!(
+            !action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "attack")
+        );
+        assert!(
+            !action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "wait")
+        );
+    }
+
+    #[test]
+    fn sidebar_uses_epilogue_location_description_after_win() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.active_objective.completed = true;
+        run.current_location_id = "garage".to_owned();
+        run.locked_locations.remove("garage");
+
+        let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+
+        assert!(
+            sidebar
+                .current_location_description
+                .contains("gives up being an arena")
+        );
+        assert!(
+            sidebar
+                .current_location_status_lines
+                .iter()
+                .any(|line| { line.contains("Aftermath hook: Post-credits hook: end-card media") })
+        );
+    }
+
+    #[test]
+    fn epilogue_phase_is_visible_in_header_sidebar_and_banner() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.active_objective.completed = true;
+        run.current_location_id = "garage".to_owned();
+        run.locked_locations.remove("garage");
+
+        let header_chips = build_game_header_chips(Some(&run), 0.10);
+        assert!(
+            header_chips
+                .iter()
+                .any(|chip| chip.label == "Phase" && chip.value == "Epilogue")
+        );
+
+        let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+        assert_eq!(sidebar.run_phase_line, "Run phase: Epilogue");
+
+        let banner = build_outcome_banner(Some(&run)).expect("win banner should build");
+        assert_eq!(banner.label, "WIN");
+        assert!(
+            banner
+                .followup
+                .as_deref()
+                .is_some_and(|followup| followup.contains("Aftermath exploration"))
+        );
+    }
+
+    #[test]
+    fn diagnostics_summary_surfaces_epilogue_phase() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.active_objective.completed = true;
+
+        let report = crate::diagnostics::build_diagnostic_report(
+            &crate::data::datapacks::DatapackCatalog {
+                valid: Vec::new(),
+                invalid: Vec::new(),
+            },
+            Some(&bundle),
+            Some(&run),
+            true,
+            "runtime/saves/current_run.json",
+            1,
+            Some(1),
+            "test-schema",
+            &[],
+        );
+        let summary = build_diagnostics_summary(&report);
+
+        assert!(
+            summary
+                .run_health_rows
+                .iter()
+                .any(|row| row == "Run phase: Epilogue")
+        );
+    }
+
+    #[test]
+    fn media_display_formats_epilogue_hook_key_for_players() {
+        let media_panel = crate::media::MediaPanelState {
+            title: "Test".to_owned(),
+            subtitle: "Test".to_owned(),
+            narrator_brief: None,
+            selected_image: None,
+            selected_motion: None,
+            selected_audio: None,
+            selected_display_role: None,
+            has_missing_media: false,
+            used_datapack_fallback: false,
+            used_engine_fallback: false,
+            placeholder_message: "None".to_owned(),
+            world_tone: None,
+            boundary_rule: None,
+            current_location_name: None,
+            current_location_description: None,
+            active_cues: Vec::new(),
+            encounter_snapshot: Vec::new(),
+            future_hook_keys: vec!["epilogue_hook:garage".to_owned()],
+        };
+
+        let display = super::build_media_panel_display(&media_panel);
+
+        assert!(
+            display
+                .future_hook_rows
+                .iter()
+                .any(|row| row == "Aftermath media hook: garage")
+        );
     }
 }

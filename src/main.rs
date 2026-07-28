@@ -2,6 +2,7 @@ mod app;
 mod data;
 mod diagnostics;
 mod game;
+mod handoff;
 mod media;
 mod runtime;
 mod session;

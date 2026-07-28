@@ -90,7 +90,7 @@ pub fn build_media_panel_state(
 
     let selection = select_media_focus(current_bundle, current_run, recent_events);
     let active_cues = build_active_cues(current_bundle, current_run, recent_events);
-    let future_hook_keys = build_future_hook_keys(current_run, recent_events);
+    let future_hook_keys = build_future_hook_keys(current_bundle, current_run, recent_events);
     let encounter_snapshot = build_encounter_snapshot(current_bundle, current_run);
 
     let (title, subtitle) = selection
@@ -500,6 +500,7 @@ fn build_active_cues(
 }
 
 fn build_future_hook_keys(
+    current_bundle: Option<&DatapackBundle>,
     current_run: Option<&RunState>,
     recent_events: &[GameEvent],
 ) -> Vec<String> {
@@ -509,6 +510,15 @@ fn build_future_hook_keys(
         keys.push(format!("location:{}", run.current_location_id));
         if run.active_objective.completed {
             keys.push("run:won".to_owned());
+            if let Some(bundle) = current_bundle
+                && let Some(location) = bundle
+                    .locations
+                    .iter()
+                    .find(|location| location.id == run.current_location_id)
+                && location.epilogue_hook.is_some()
+            {
+                keys.push(format!("epilogue_hook:{}", location.id));
+            }
         } else if run.hp <= 0 {
             keys.push("run:lost".to_owned());
         } else {
@@ -645,6 +655,7 @@ fn media_selection_for_location_event(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn media_selection_for_focus_event(
     bundle: &DatapackBundle,
     current_location: Option<&LocationTemplate>,
@@ -1034,5 +1045,24 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("Garage Brute"))
         );
+    }
+
+    #[test]
+    fn media_panel_surfaces_epilogue_hook_key_after_win() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.active_objective.completed = true;
+        state.current_location_id = "garage".to_owned();
+
+        let media = build_media_panel_state(Some(&bundle), Some(&state), &[]);
+
+        assert!(
+            media
+                .future_hook_keys
+                .iter()
+                .any(|key| key == "epilogue_hook:garage")
+        );
+        assert!(media.future_hook_keys.iter().any(|key| key == "run:won"));
     }
 }

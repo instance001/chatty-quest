@@ -38,14 +38,16 @@ This pack is the `v0.1` proof slice for:
 Automated validation:
 
 - original `v0.1` release validation passed on `2026-06-11`
-- the current post-`v0.1` branch now passes `47` automated tests
-- current coverage includes datapack loading, run generation, locked progression, barricade behavior, noise escalation, threat forecasting, finale-phase combat behavior, secured-property finale payoff behavior, narrator boundaries, media focus, diagnostics, and save/load roundtrip
+- the current post-`v0.1` branch now passes `67` automated tests
+- the current post-`v0.1` branch now passes `cargo clippy --all-targets --all-features -- -D warnings`
+- current coverage includes datapack loading, run generation, command boundary parsing, locked progression, barricade behavior, noise escalation, threat forecasting, finale-phase combat behavior, secured-property finale payoff behavior, epilogue phase surfacing, post-win epilogue hooks, epilogue hook UI surfacing, objective-condition name surfacing, sidebar objective-progress surfacing, utility/security truth surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, and save/load roundtrip
 
 Manual validation:
 
 - live desktop sweep completed successfully on `2026-06-11`
 - scenario was confirmed playable, completable, saveable, and reloadable
-- refreshed current-branch sweep and audit notes are dated `2026-07-16`
+- refreshed current-branch sweep and audit notes are dated `2026-07-28`
+- current-branch live desktop sweep passed on `2026-07-28`
 
 Supporting records:
 

@@ -14,9 +14,9 @@ It answers:
 
 This is the implementation-facing companion to:
 
-- [ARCHITECTURE.md](c:/Users/User/Desktop/chatty-quest/docs/ARCHITECTURE.md:1)
-- [RUNTIME_MODEL_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/RUNTIME_MODEL_SPEC.md:1)
-- [STATE_AND_BUCKETS.md](c:/Users/User/Desktop/chatty-quest/docs/STATE_AND_BUCKETS.md:1)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [RUNTIME_MODEL_SPEC.md](RUNTIME_MODEL_SPEC.md)
+- [STATE_AND_BUCKETS.md](STATE_AND_BUCKETS.md)
 
 ## Core Rule
 
@@ -216,6 +216,8 @@ It should describe:
 - what the current local scene now is
 - what emotional or stylistic framing is appropriate from datapack capsules
 
+The current concrete contract for this payload is documented in [NARRATOR_CONTEXT_SPEC.md](NARRATOR_CONTEXT_SPEC.md).
+
 ## Event Design Rules
 
 Events should be:
@@ -344,6 +346,8 @@ Bad inputs:
 - media captions treated as state
 
 If a future summary system needs more nuance, that nuance should be added as structured reducer output rather than scraped from prose.
+
+The current concrete support-memory contract is documented in [ROLLING_SUMMARY_SPEC.md](ROLLING_SUMMARY_SPEC.md).
 
 ## Media Contract
 

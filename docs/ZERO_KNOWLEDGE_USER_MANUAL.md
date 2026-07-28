@@ -1,6 +1,6 @@
 # Chatty Quest Zero-Spoiler User Manual
 
-Last updated: `2026-07-16`
+Last updated: `2026-07-28`
 
 ## What This Manual Is
 
@@ -164,6 +164,8 @@ The game also understands a few aliases:
 - `fortify <location>`
 - `secure <location>`
 
+If you type a command that needs a target but leave the target blank, the game asks for the missing target instead of guessing.
+
 ## What The Important Commands Mean
 
 ### `look`
@@ -259,6 +261,12 @@ It often points at the most immediately useful next move.
 
 If you feel stuck, read it.
 
+### Objective Progress
+
+The Game sidebar can show the active objective requirements.
+
+It names the item, location, and boss requirements when the datapack provides those names.
+
 ### Route Role
 
 Some locations are described in terms of their tactical role.
@@ -280,6 +288,12 @@ It is especially useful when deciding whether to:
 - wait
 - secure a space
 - take a side route
+
+### Utility And Security Rows
+
+The Character tab can show utility relevance and siege security rows.
+
+These rows tell you what held utility items can currently help with, which approaches are secured, which are still open, and whether barricaded rooms can help noise settle.
 
 ## The Four Core Ideas You Need
 
@@ -409,6 +423,12 @@ The current build preserves important state such as:
 - route state
 - escalation state
 - objective state
+
+## After A Win
+
+A completed run stays open for aftermath exploration.
+
+After the win, the UI reports the run phase as `Epilogue`. Safe commands such as `look`, `inspect`, and open-route movement still work. Rooms may also read differently if the datapack provides aftermath text or small post-credits hooks, and the sidebar/media panel can surface those hooks as future-content cues. Dangerous or mutation-heavy commands stop changing the main run until future scenario content gives the epilogue something explicit to do.
 
 ## If You Feel Lost
 

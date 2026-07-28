@@ -41,7 +41,7 @@ Useful files and folders:
 - `media/`
 - `capsules/`
 
-For the deeper structure, see [DATAPACK_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/DATAPACK_SPEC.md:1).
+For the deeper structure, see [DATAPACK_SPEC.md](DATAPACK_SPEC.md).
 
 ## Template Id Rule
 
@@ -212,6 +212,8 @@ Example location template:
 id = "front_verandah"
 name = "Front Verandah"
 description = "The front entry point of the property, boxed in by bad luck and worse noise."
+epilogue_description = "The front verandah is still splintered, but the worst pressure has gone slack."
+epilogue_hook = "Post-credits hook: a neighbor's porch light flickers twice across the street."
 narrator_brief = "Play this as the bad threshold of the run."
 tags = ["outdoor", "entry", "starting_location"]
 
@@ -222,6 +224,10 @@ display_role = "location"
 
 enemies = ["shambler_front_gate"]
 ```
+
+The optional `epilogue_description` is used after the active objective is complete. It lets a datapack author make post-win exploration feel authored without adding a scripting system.
+
+The optional `epilogue_hook` is also post-win presentation content. It appears as an aftermath hook, can surface in sidebar/media cues, and creates a future media key such as `epilogue_hook:front_verandah`, but it does not create objectives, items, routes, or state changes by itself.
 
 Example enemy template:
 

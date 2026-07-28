@@ -100,6 +100,10 @@ pub struct LocationTemplate {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub epilogue_description: Option<String>,
+    #[serde(default)]
+    pub epilogue_hook: Option<String>,
     pub narrator_brief: Option<String>,
     pub tags: Vec<String>,
     #[serde(default)]
@@ -379,6 +383,24 @@ fn load_datapack_bundle_from_path(
     if let Some(locations) = &locations {
         validate_unique_ids("locations", &locations.locations, &mut errors);
         validate_non_blank_names("locations", &locations.locations, &mut errors);
+        for location in &locations.locations {
+            if let Some(epilogue_description) = &location.epilogue_description
+                && epilogue_description.trim().is_empty()
+            {
+                errors.push(format!(
+                    "Location '{}' must not define a blank epilogue_description.",
+                    location.id
+                ));
+            }
+            if let Some(epilogue_hook) = &location.epilogue_hook
+                && epilogue_hook.trim().is_empty()
+            {
+                errors.push(format!(
+                    "Location '{}' must not define a blank epilogue_hook.",
+                    location.id
+                ));
+            }
+        }
     }
     if let Some(items) = &items {
         validate_unique_ids("items", &items.items, &mut errors);
@@ -1080,6 +1102,18 @@ damage = 1
             .iter()
             .find(|location| location.id == "garage")
             .expect("expected garage template");
+        assert!(
+            garage
+                .epilogue_description
+                .as_deref()
+                .is_some_and(|description| description.contains("gives up being an arena"))
+        );
+        assert!(
+            garage
+                .epilogue_hook
+                .as_deref()
+                .is_some_and(|hook| hook.contains("end-card media"))
+        );
         assert!(garage.locked);
         assert_eq!(garage.unlock_item_id.as_deref(), Some("house_keys"));
         let front_verandah = bundle
@@ -1251,6 +1285,82 @@ bosses = ["test_boss"]
             errors.iter().any(|error| {
                 error.contains("references unknown barricade_item_id 'missing_kit'")
             })
+        );
+    }
+
+    #[test]
+    fn location_validation_rejects_blank_epilogue_description() {
+        let dir = TempDatapackDir::new("location_blank_epilogue");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+epilogue_description = "   "
+tags = ["start"]
+connections = []
+items = []
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("must not define a blank epilogue_description") })
+        );
+    }
+
+    #[test]
+    fn location_validation_rejects_blank_epilogue_hook() {
+        let dir = TempDatapackDir::new("location_blank_epilogue_hook");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+epilogue_hook = "   "
+tags = ["start"]
+connections = []
+items = []
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("must not define a blank epilogue_hook") })
         );
     }
 }

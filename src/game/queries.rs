@@ -19,7 +19,11 @@ pub fn describe_location(
     bundle: &DatapackBundle,
     location: &LocationTemplate,
 ) -> Vec<String> {
-    let mut lines = vec![format!("{}: {}", location.name, location.description)];
+    let mut lines = vec![format!(
+        "{}: {}",
+        location.name,
+        location_description_for_state(state, location)
+    )];
 
     if location.locked {
         let lock_state = if state.locked_locations.contains(&location.id) {
@@ -57,6 +61,12 @@ pub fn describe_location(
             ));
         }
         lines.push(format!("{}.", barricade_line));
+    }
+
+    if state.active_objective.completed
+        && let Some(epilogue_hook) = location.epilogue_hook.as_deref()
+    {
+        lines.push(format!("Aftermath hook: {}.", epilogue_hook));
     }
 
     if !location.connections.is_empty() {
@@ -202,6 +212,20 @@ pub fn is_location_locked(state: &RunState, location_id: &str) -> bool {
 
 pub fn is_location_barricaded(state: &RunState, location_id: &str) -> bool {
     state.barricaded_locations.contains(location_id)
+}
+
+pub fn location_description_for_state<'a>(
+    state: &RunState,
+    location: &'a LocationTemplate,
+) -> &'a str {
+    if state.active_objective.completed {
+        location
+            .epilogue_description
+            .as_deref()
+            .unwrap_or(location.description.as_str())
+    } else {
+        location.description.as_str()
+    }
 }
 
 pub fn matches_name(query: &str, id: &str, name: &str) -> bool {

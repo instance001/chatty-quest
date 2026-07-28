@@ -17,7 +17,7 @@ It should never become a hidden authority for game truth.
 
 The media panel is driven by truth, but it is not truth.
 
-The broader engine-wide rule for this pattern is documented in [DERIVED_VIEW_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/DERIVED_VIEW_SPEC.md:1).
+The broader engine-wide rule for this pattern is documented in [DERIVED_VIEW_SPEC.md](DERIVED_VIEW_SPEC.md).
 
 That means:
 

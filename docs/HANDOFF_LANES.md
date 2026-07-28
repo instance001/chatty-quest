@@ -32,15 +32,19 @@ This mirrors the pattern seen in the reference projects:
 
 `v0.1` does not implement live handoff behavior.
 
+The current branch does include a local dry-contract run snapshot builder. That builder creates an in-memory payload shape for tests and future review; it does not export files, watch folders, sync peers, or call sibling tools.
+
 Allowed in `v0.1`:
 
 - reserved folders
 - documented packet expectations
 - placeholder examples if useful
+- in-process payload shape validation
 
 Not allowed in `v0.1`:
 
 - active ChattyCog bridge code
+- automatic packet writing
 - live Chatty-Art requests
 - live Chatty-Lora requests
 - multiplayer transport

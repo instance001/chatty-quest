@@ -23,7 +23,7 @@ This spec also establishes the intended relationship between:
 
 The map should be a graph first and a grid second.
 
-The broader engine-wide rule for derived presentation surfaces is documented in [DERIVED_VIEW_SPEC.md](c:/Users/User/Desktop/chatty-quest/docs/DERIVED_VIEW_SPEC.md:1).
+The broader engine-wide rule for derived presentation surfaces is documented in [DERIVED_VIEW_SPEC.md](DERIVED_VIEW_SPEC.md).
 
 That means:
 

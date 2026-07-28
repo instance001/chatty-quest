@@ -94,7 +94,20 @@ pub struct ActionOutcome {
     pub lines: Vec<String>,
 }
 
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct ParsedCommand {
+    pub raw_input: String,
+    pub normalized_input: String,
+    pub action: GameAction,
+}
+
+#[allow(dead_code)]
 pub fn parse_action(input: &str) -> Result<GameAction, String> {
+    parse_command(input).map(|command| command.action)
+}
+
+pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("Type a command first.".to_owned());
@@ -103,32 +116,35 @@ pub fn parse_action(input: &str) -> Result<GameAction, String> {
     let lower = trimmed.to_ascii_lowercase();
 
     if lower == "help" {
-        return Ok(GameAction::Help);
+        return parsed(trimmed, &lower, GameAction::Help);
     }
     if lower == "look" || lower == "inspect room" {
-        return Ok(GameAction::Look);
+        return parsed(trimmed, &lower, GameAction::Look);
     }
     if lower == "attack" || lower == "hit" {
-        return Ok(GameAction::Attack);
+        return parsed(trimmed, &lower, GameAction::Attack);
     }
     if lower == "wait" {
-        return Ok(GameAction::Wait);
+        return parsed(trimmed, &lower, GameAction::Wait);
+    }
+    if let Some(verb) = targetless_verb(&lower) {
+        return Err(format!("Tell me what to {}.", verb));
     }
     if let Some(rest) = lower
         .strip_prefix("go ")
         .or_else(|| lower.strip_prefix("move "))
         .or_else(|| lower.strip_prefix("walk "))
     {
-        return Ok(GameAction::Move {
-            destination: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "go", |destination| {
+            GameAction::Move { destination }
         });
     }
     if let Some(rest) = lower
         .strip_prefix("unlock ")
         .or_else(|| lower.strip_prefix("open "))
     {
-        return Ok(GameAction::Unlock {
-            target: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "unlock", |target| {
+            GameAction::Unlock { target }
         });
     }
     if let Some(rest) = lower
@@ -136,37 +152,77 @@ pub fn parse_action(input: &str) -> Result<GameAction, String> {
         .or_else(|| lower.strip_prefix("fortify "))
         .or_else(|| lower.strip_prefix("secure "))
     {
-        return Ok(GameAction::Barricade {
-            target: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "barricade", |target| {
+            GameAction::Barricade { target }
         });
     }
     if let Some(rest) = lower.strip_prefix("inspect ") {
-        return Ok(GameAction::Inspect {
-            target: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "inspect", |target| {
+            GameAction::Inspect { target }
         });
     }
     if let Some(rest) = lower.strip_prefix("take ") {
-        return Ok(GameAction::Take {
-            item_name: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "take", |item_name| {
+            GameAction::Take { item_name }
         });
     }
     if let Some(rest) = lower.strip_prefix("equip ") {
-        return Ok(GameAction::Equip {
-            item_name: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "equip", |item_name| {
+            GameAction::Equip { item_name }
         });
     }
     if let Some(rest) = lower.strip_prefix("use ") {
-        return Ok(GameAction::Use {
-            item_name: rest.trim().to_owned(),
+        return parsed_target(trimmed, &lower, rest, "use", |item_name| GameAction::Use {
+            item_name,
         });
     }
 
     Err("I only understand a narrow set of commands right now. Try: help, look, go ..., unlock ..., barricade ..., inspect ..., take ..., equip ..., use ..., attack, wait.".to_owned())
 }
 
+fn targetless_verb(input: &str) -> Option<&'static str> {
+    match input {
+        "go" | "move" | "walk" => Some("go"),
+        "unlock" | "open" => Some("unlock"),
+        "barricade" | "fortify" | "secure" => Some("barricade"),
+        "inspect" => Some("inspect"),
+        "take" => Some("take"),
+        "equip" => Some("equip"),
+        "use" => Some("use"),
+        _ => None,
+    }
+}
+
+fn parsed(
+    raw_input: &str,
+    normalized_input: &str,
+    action: GameAction,
+) -> Result<ParsedCommand, String> {
+    Ok(ParsedCommand {
+        raw_input: raw_input.to_owned(),
+        normalized_input: normalized_input.to_owned(),
+        action,
+    })
+}
+
+fn parsed_target(
+    raw_input: &str,
+    normalized_input: &str,
+    rest: &str,
+    verb: &str,
+    make_action: impl FnOnce(String) -> GameAction,
+) -> Result<ParsedCommand, String> {
+    let target = rest.trim();
+    if target.is_empty() {
+        return Err(format!("Tell me what to {}.", verb));
+    }
+
+    parsed(raw_input, normalized_input, make_action(target.to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GameAction, parse_action};
+    use super::{GameAction, parse_action, parse_command};
 
     #[test]
     fn parse_action_supports_unlock_aliases() {
@@ -190,5 +246,26 @@ mod tests {
             parse_action("fortify front verandah"),
             Ok(GameAction::Barricade { target }) if target == "front verandah"
         ));
+    }
+
+    #[test]
+    fn parse_command_preserves_raw_input_and_resolves_to_structured_action() {
+        let parsed = parse_command("  Go Garage  ").expect("expected command to parse");
+
+        assert_eq!(parsed.raw_input, "Go Garage");
+        assert_eq!(parsed.normalized_input, "go garage");
+        assert!(matches!(
+            parsed.action,
+            GameAction::Move { destination } if destination == "garage"
+        ));
+    }
+
+    #[test]
+    fn parse_action_rejects_target_verbs_without_targets() {
+        assert!(matches!(parse_action("go "), Err(error) if error == "Tell me what to go."));
+        assert!(
+            matches!(parse_action("inspect "), Err(error) if error == "Tell me what to inspect.")
+        );
+        assert!(matches!(parse_action("use "), Err(error) if error == "Tell me what to use."));
     }
 }
