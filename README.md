@@ -40,6 +40,12 @@ The goal is to prove:
 - a replaceable narrator seam
 - save/load reliability
 
+## Storage Layout
+
+Chatty Quest stores writable runtime data under the active app root. Source runs use the repository folder. Packaged executable runs use the executable's folder. Set `CHATTY_QUEST_BASE_PATH` to force a portable root for testing, scripts, or custom installs.
+
+On first run the app creates the writable skeleton it needs, including `runtime/`, `runtime/saves/`, `runtime/config/`, `runtime/logs/`, `models/`, `datasets/`, and `handoff/`. Bundled gameplay content should ship beside the app root under `assets/datapacks/`.
+
 ## RD Engine Loop Map
 
 ```mermaid

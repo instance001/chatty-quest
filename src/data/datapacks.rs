@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::app_paths;
+
 const DATAPACKS_ROOT: &str = "assets/datapacks";
 const DATAPACK_SCHEMA_VERSION: &str = "v0.1-toml-templates-2";
 
@@ -219,7 +221,7 @@ pub fn discover_datapacks() -> DatapackCatalog {
     let mut valid = Vec::new();
     let mut invalid = Vec::new();
 
-    let root = Path::new(DATAPACKS_ROOT);
+    let root = app_paths::datapacks_root();
     let Ok(entries) = fs::read_dir(root) else {
         invalid.push(InvalidDatapack {
             folder_name: DATAPACKS_ROOT.to_owned(),
@@ -255,7 +257,7 @@ pub fn discover_datapacks() -> DatapackCatalog {
 }
 
 pub fn load_datapack_bundle_by_folder(folder_name: &str) -> Result<DatapackBundle, Vec<String>> {
-    let path = Path::new(DATAPACKS_ROOT).join(folder_name);
+    let path = app_paths::datapacks_root().join(folder_name);
     load_datapack_bundle_from_path(&path, folder_name)
 }
 
@@ -270,7 +272,7 @@ pub fn resolve_media_path(bundle: &DatapackBundle, relative_path: &str) -> Optio
     }
 
     Some(
-        Path::new(DATAPACKS_ROOT)
+        app_paths::datapacks_root()
             .join(&bundle.folder_name)
             .join(trimmed)
             .display()

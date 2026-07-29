@@ -70,7 +70,7 @@ pub struct SetupScreenModel<'a> {
     pub gpu_narrator_model: &'a mut String,
     pub datapacks: &'a DatapackCatalog,
     pub selected_record: Option<SelectedDatapackPreview>,
-    pub header_image_path: Option<&'a str>,
+    pub header_image_path: Option<String>,
 }
 
 pub struct SplashScreenModel<'a> {
@@ -78,7 +78,7 @@ pub struct SplashScreenModel<'a> {
     pub subtitle: &'a str,
     pub supporting_line: Option<&'a str>,
     pub footer: &'a str,
-    pub image_path: Option<&'a str>,
+    pub image_path: Option<String>,
     pub progress: f32,
 }
 
@@ -108,7 +108,7 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.add_space(24.0);
         if let Some(image_path) = model.header_image_path {
-            let image_uri = local_file_uri(image_path);
+            let image_uri = local_file_uri(&image_path);
             ui.vertical_centered(|ui| {
                 ui.add(
                     egui::Image::from_uri(image_uri)
@@ -331,7 +331,7 @@ pub fn show_splash_screen(ctx: &egui::Context, model: SplashScreenModel<'_>) {
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width().min(880.0));
                         if let Some(image_path) = model.image_path {
-                            let image_uri = local_file_uri(image_path);
+                            let image_uri = local_file_uri(&image_path);
                             ui.add(
                                 egui::Image::from_uri(image_uri)
                                     .max_width(ui.available_width().min(820.0))

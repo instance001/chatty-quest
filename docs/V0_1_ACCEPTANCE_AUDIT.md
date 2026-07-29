@@ -238,4 +238,4 @@ Recommended final pre-`v0.1` check:
 - original `v0.1` sweep completed successfully on `2026-06-11`
 - current branch sweep completed successfully on `2026-07-28`
 - runbook used: [docs/V0_1_MANUAL_SWEEP.md](docs/V0_1_MANUAL_SWEEP.md)
-- supporting screenshot: `C:/Users/User/Pictures/Screenshots/Screenshot 2026-07-28 114747.png`
+- supporting screenshots for release documentation live under `assets/ui/screenshots/`

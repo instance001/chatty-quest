@@ -1,11 +1,10 @@
 use std::fs;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::app_paths;
 use crate::game::{GameEvent, RunState};
 
-const SAVE_PATH: &str = "runtime/saves/current_run.json";
 const SAVE_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -28,26 +27,28 @@ pub struct SavePayload {
 }
 
 pub fn save_game(payload: &SavePayload) -> Result<String, String> {
-    if let Some(parent) = Path::new(SAVE_PATH).parent() {
+    let save_path = app_paths::current_save_path();
+    if let Some(parent) = save_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("Could not create save folder: {}.", err))?;
     }
 
     let json = serde_json::to_string_pretty(payload)
         .map_err(|err| format!("Could not serialize save payload: {}.", err))?;
-    fs::write(SAVE_PATH, json).map_err(|err| format!("Could not write save file: {}.", err))?;
+    fs::write(&save_path, json).map_err(|err| format!("Could not write save file: {}.", err))?;
 
-    Ok(SAVE_PATH.to_owned())
+    Ok(save_path.display().to_string())
 }
 
 pub fn load_game() -> Result<SavePayload, String> {
-    let json = fs::read_to_string(SAVE_PATH)
+    let save_path = app_paths::current_save_path();
+    let json = fs::read_to_string(&save_path)
         .map_err(|err| format!("Could not read save file: {}.", err))?;
     serde_json::from_str(&json).map_err(|err| format!("Could not parse save file: {}.", err))
 }
 
-pub fn current_save_path() -> &'static str {
-    SAVE_PATH
+pub fn current_save_path() -> String {
+    app_paths::current_save_path().display().to_string()
 }
 
 pub fn current_save_version() -> u32 {
@@ -85,7 +86,8 @@ mod tests {
 
     impl Drop for SaveFileGuard {
         fn drop(&mut self) {
-            let path = Path::new(current_save_path());
+            let save_path = current_save_path();
+            let path = Path::new(&save_path);
             match &self.original_contents {
                 Some(contents) => {
                     if let Some(parent) = path.parent() {

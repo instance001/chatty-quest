@@ -1,8 +1,8 @@
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
 
+use crate::app_paths;
 use crate::data::datapacks::{
     DatapackBundle, DatapackCatalog, DatapackRecord, datapack_schema_version, discover_datapacks,
     load_datapack_bundle_by_folder,
@@ -146,7 +146,8 @@ impl ChattyQuestApp {
                     "{} is ready for a local run on the {}.",
                     APP_DISPLAY_NAME, ENGINE_DISPLAY_NAME
                 ),
-                "Datapack discovery reads the local assets/datapacks folder.".to_owned(),
+                "Datapack discovery reads the active app root's assets/datapacks folder."
+                    .to_owned(),
                 "Generate a scenario or load the current save to enter the tabbed game shell."
                     .to_owned(),
             ],
@@ -376,12 +377,13 @@ impl ChattyQuestApp {
                 }
             }
             GameTab::Diagnostics => {
+                let save_path = current_save_path();
                 let report = build_diagnostic_report(
                     &self.datapacks,
                     self.current_bundle.as_ref(),
                     self.current_run.as_ref(),
                     self.narrator.is_some(),
-                    current_save_path(),
+                    &save_path,
                     current_save_version(),
                     self.loaded_save_version,
                     datapack_schema_version(),
@@ -621,6 +623,7 @@ fn apply_theme(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
-fn asset_if_present(path: &'static str) -> Option<&'static str> {
-    Path::new(path).exists().then_some(path)
+fn asset_if_present(path: &'static str) -> Option<String> {
+    let resolved = app_paths::path(path);
+    resolved.exists().then(|| resolved.display().to_string())
 }

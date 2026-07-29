@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::app_paths;
 use crate::data::datapacks::{
     DatapackBundle, DatapackCatalog, MediaReferences, resolve_media_assets,
 };
@@ -289,8 +290,8 @@ pub fn build_diagnostic_report(
     .into_iter()
     .map(|(label, path)| EnvironmentCheck {
         label: label.to_owned(),
-        path: path.to_owned(),
-        present: Path::new(path).exists(),
+        path: app_paths::display_path(path),
+        present: app_paths::path(path).exists(),
     })
     .collect::<Vec<_>>();
 
@@ -499,7 +500,7 @@ fn collect_diagnostic_warnings(
         "datasets",
         "handoff",
     ] {
-        if !Path::new(required_path).exists() {
+        if !app_paths::path(required_path).exists() {
             warnings.push(DiagnosticMessage::error(
                 DiagnosticArea::Runtime,
                 format!("Expected folder '{}' is missing.", required_path),

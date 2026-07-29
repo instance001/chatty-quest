@@ -1,4 +1,5 @@
 mod app;
+mod app_paths;
 mod data;
 mod diagnostics;
 mod game;
@@ -8,14 +9,17 @@ mod runtime;
 mod session;
 mod ui;
 
-use std::path::Path;
-
 use app::ChattyQuestApp;
+use app_paths::{ensure_app_layout, path as app_path};
 
 const APP_WINDOW_TITLE: &str = "Chatty Quest - RD Engine";
 const APP_WINDOW_ICON_PATH: &str = "assets/ui/branding/chatty-quest-token.png";
 
 fn main() -> eframe::Result<()> {
+    if let Err(error) = ensure_app_layout() {
+        eprintln!("Could not create Chatty Quest app folders: {error}");
+    }
+
     let viewport = if let Some(icon) = load_window_icon(APP_WINDOW_ICON_PATH) {
         egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
@@ -45,7 +49,7 @@ fn main() -> eframe::Result<()> {
 }
 
 fn load_window_icon(path: &str) -> Option<egui::IconData> {
-    let image_path = Path::new(path);
+    let image_path = app_path(path);
     let image = image::open(image_path).ok()?.into_rgba8();
     let (width, height) = image.dimensions();
 
