@@ -1,4 +1,4 @@
-use crate::data::datapacks::DatapackBundle;
+use crate::data::datapacks::{BossTemplate, DatapackBundle};
 
 use super::RunState;
 
@@ -15,6 +15,19 @@ pub fn run_phase_label(run: &RunState) -> &'static str {
         "Epilogue"
     } else {
         "Active"
+    }
+}
+
+pub fn boss_wounded_phase_active(boss: &BossTemplate, remaining_hp: i32) -> bool {
+    boss.wounded_phase_hp_threshold
+        .is_some_and(|threshold| remaining_hp > 0 && remaining_hp <= threshold)
+}
+
+pub fn boss_wounded_phase_damage_bonus(boss: &BossTemplate) -> i32 {
+    if boss.wounded_phase_hp_threshold.is_some() {
+        boss.wounded_phase_damage_bonus.max(0)
+    } else {
+        0
     }
 }
 
@@ -177,16 +190,27 @@ pub fn security_summary_rows(run: &RunState, bundle: Option<&DatapackBundle>) ->
         ),
     ];
 
-    if property_siege_lanes_secured(run) {
-        rows.push(
-            "Finale security: both exposed approaches are secured; garage retaliation is reduced."
-                .to_owned(),
-        );
-    } else if run.active_objective.required_location_id.as_deref() == Some("garage") {
-        rows.push(
-            "Finale security: secure Front Verandah and Back Garden before the finale to reduce garage retaliation."
-                .to_owned(),
-        );
+    if finale_security_secured(run, bundle) {
+        if let Some(line) = bundle.rules.finale_security_secured_line.as_deref() {
+            rows.push(render_finale_security_line(
+                line,
+                bundle,
+                bundle.rules.finale_secured_retaliation_reduction,
+            ));
+        }
+    } else if run.active_objective.required_location_id.as_deref()
+        == bundle.rules.finale_target_location_id.as_deref()
+    {
+        let required = finale_security_required_location_labels(bundle);
+        if !required.is_empty()
+            && let Some(line) = bundle.rules.finale_security_unsecured_line.as_deref()
+        {
+            rows.push(render_finale_security_line(
+                line,
+                bundle,
+                bundle.rules.finale_secured_retaliation_reduction,
+            ));
+        }
     }
 
     if run.barricaded_locations.is_empty() {
@@ -335,7 +359,42 @@ fn open_barricade_target_labels(
         .collect()
 }
 
-fn property_siege_lanes_secured(run: &RunState) -> bool {
-    run.barricaded_locations.contains("front_verandah")
-        && run.barricaded_locations.contains("back_garden")
+pub fn finale_security_secured(run: &RunState, bundle: &DatapackBundle) -> bool {
+    !bundle.rules.finale_secured_location_ids.is_empty()
+        && bundle
+            .rules
+            .finale_secured_location_ids
+            .iter()
+            .all(|location_id| run.barricaded_locations.contains(location_id))
+}
+
+pub fn finale_security_retaliation_reduction(
+    run: &RunState,
+    bundle: &DatapackBundle,
+    boss_id: &str,
+) -> i32 {
+    if bundle.rules.finale_boss_id.as_deref() == Some(boss_id)
+        && finale_security_secured(run, bundle)
+    {
+        bundle.rules.finale_secured_retaliation_reduction.max(0)
+    } else {
+        0
+    }
+}
+
+fn finale_security_required_location_labels(bundle: &DatapackBundle) -> Vec<String> {
+    bundle
+        .rules
+        .finale_secured_location_ids
+        .iter()
+        .map(|location_id| location_label(Some(bundle), location_id))
+        .collect()
+}
+
+fn render_finale_security_line(line: &str, bundle: &DatapackBundle, reduction: i32) -> String {
+    line.replace(
+        "{required_locations}",
+        &finale_security_required_location_labels(bundle).join(" and "),
+    )
+    .replace("{reduction}", &reduction.to_string())
 }

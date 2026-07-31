@@ -27,6 +27,8 @@ pub struct RunState {
     #[serde(default)]
     pub broken_locked_locations: HashSet<String>,
     pub barricaded_locations: HashSet<String>,
+    #[serde(default)]
+    pub turn_index: u64,
     pub noise_level: i32,
     #[serde(default)]
     pub noise_spawn_count: u32,

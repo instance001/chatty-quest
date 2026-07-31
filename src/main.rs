@@ -9,6 +9,9 @@ mod runtime;
 mod session;
 mod ui;
 
+#[cfg(test)]
+mod engine_boundary_tests;
+
 use app::ChattyQuestApp;
 use app_paths::{ensure_app_layout, path as app_path};
 

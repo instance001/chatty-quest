@@ -24,6 +24,10 @@ fn default_spawned_hazard_break_chance_percent() -> u8 {
     35
 }
 
+fn default_spawned_enemy_movement_policy() -> String {
+    "random".to_owned()
+}
+
 #[derive(Clone, Debug)]
 pub struct DatapackSummary {
     pub id: String,
@@ -118,6 +122,22 @@ pub struct RulesToml {
     pub sight_chase_delay_chance_percent: u8,
     #[serde(default = "default_spawned_hazard_break_chance_percent")]
     pub spawned_hazard_break_chance_percent: u8,
+    #[serde(default = "default_spawned_enemy_movement_policy")]
+    pub spawned_enemy_movement_policy: String,
+    #[serde(default)]
+    pub starter_hint_line: Option<String>,
+    #[serde(default)]
+    pub finale_target_location_id: Option<String>,
+    #[serde(default)]
+    pub finale_boss_id: Option<String>,
+    #[serde(default)]
+    pub finale_secured_location_ids: Vec<String>,
+    #[serde(default)]
+    pub finale_secured_retaliation_reduction: i32,
+    #[serde(default)]
+    pub finale_security_secured_line: Option<String>,
+    #[serde(default)]
+    pub finale_security_unsecured_line: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -131,6 +151,50 @@ pub struct LocationTemplate {
     pub epilogue_hook: Option<String>,
     pub narrator_brief: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub route_note: Option<String>,
+    #[serde(default)]
+    pub threat_forecast_locked: Option<String>,
+    #[serde(default)]
+    pub threat_forecast_cleared: Option<String>,
+    #[serde(default)]
+    pub threat_forecast_barricaded: Option<String>,
+    #[serde(default)]
+    pub threat_forecast_open: Option<String>,
+    #[serde(default)]
+    pub threat_forecast_boss_live: Option<String>,
+    #[serde(default)]
+    pub threat_forecast_boss_secured: Option<String>,
+    #[serde(default)]
+    pub movement_context_lines: Vec<String>,
+    #[serde(default)]
+    pub movement_context_secured_line: Option<String>,
+    #[serde(default)]
+    pub boss_defeated_objective_line: Option<String>,
+    #[serde(default)]
+    pub boss_retaliation_context_line: Option<String>,
+    #[serde(default)]
+    pub situation_enemy_cleared_line: Option<String>,
+    #[serde(default)]
+    pub situation_barricaded_line: Option<String>,
+    #[serde(default)]
+    pub situation_high_noise_line: Option<String>,
+    #[serde(default)]
+    pub situation_boss_wounded_secured_line: Option<String>,
+    #[serde(default)]
+    pub situation_boss_wounded_line: Option<String>,
+    #[serde(default)]
+    pub situation_boss_secured_line: Option<String>,
+    #[serde(default)]
+    pub situation_boss_partially_secured_line: Option<String>,
+    #[serde(default)]
+    pub passive_pressure_enemy_id: Option<String>,
+    #[serde(default)]
+    pub passive_pressure_blocked_line: Option<String>,
+    #[serde(default)]
+    pub passive_pressure_damage_line: Option<String>,
+    #[serde(default)]
+    pub passive_pressure_high_noise_line: Option<String>,
     #[serde(default)]
     pub media: MediaReferences,
     #[serde(default)]
@@ -176,6 +240,18 @@ pub struct ItemTemplate {
     pub damage: i32,
     #[serde(default)]
     pub utility_effect: Option<String>,
+    #[serde(default)]
+    pub inspect_lines: Vec<String>,
+    #[serde(default)]
+    pub objective_required_line: Option<String>,
+    #[serde(default)]
+    pub objective_not_required_line: Option<String>,
+    #[serde(default)]
+    pub pickup_line: Option<String>,
+    #[serde(default)]
+    pub utility_success_line: Option<String>,
+    #[serde(default)]
+    pub utility_empty_line: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -193,6 +269,14 @@ pub struct EnemyTemplate {
     pub media: MediaReferences,
     pub hp: i32,
     pub damage: i32,
+    #[serde(default)]
+    pub retaliation_line: Option<String>,
+    #[serde(default)]
+    pub defeat_line: Option<String>,
+    #[serde(default)]
+    pub inspect_alive_line: Option<String>,
+    #[serde(default)]
+    pub inspect_defeated_line: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -210,6 +294,26 @@ pub struct BossTemplate {
     pub media: MediaReferences,
     pub hp: i32,
     pub damage: i32,
+    #[serde(default)]
+    pub wounded_phase_hp_threshold: Option<i32>,
+    #[serde(default)]
+    pub wounded_phase_damage_bonus: i32,
+    #[serde(default)]
+    pub defeat_line: Option<String>,
+    #[serde(default)]
+    pub retaliation_line: Option<String>,
+    #[serde(default)]
+    pub finale_security_retaliation_line: Option<String>,
+    #[serde(default)]
+    pub wounded_phase_combat_line: Option<String>,
+    #[serde(default)]
+    pub wounded_phase_retaliation_line: Option<String>,
+    #[serde(default)]
+    pub wounded_phase_inspect_active: Option<String>,
+    #[serde(default)]
+    pub wounded_phase_inspect_pending: Option<String>,
+    #[serde(default)]
+    pub wounded_phase_inspect_defeated: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -427,6 +531,55 @@ fn load_datapack_bundle_from_path(
             rules.spawned_hazard_break_chance_percent,
             &mut errors,
         );
+        match rules.spawned_enemy_movement_policy.trim() {
+            "random" | "path_to_attractor" => {}
+            "" => errors
+                .push("rules.toml spawned_enemy_movement_policy must not be blank.".to_owned()),
+            other => errors.push(format!(
+                "rules.toml spawned_enemy_movement_policy '{}' is not supported.",
+                other
+            )),
+        }
+
+        for (field_name, value) in [
+            ("starter_hint_line", rules.starter_hint_line.as_deref()),
+            (
+                "finale_target_location_id",
+                rules.finale_target_location_id.as_deref(),
+            ),
+            ("finale_boss_id", rules.finale_boss_id.as_deref()),
+            (
+                "finale_security_secured_line",
+                rules.finale_security_secured_line.as_deref(),
+            ),
+            (
+                "finale_security_unsecured_line",
+                rules.finale_security_unsecured_line.as_deref(),
+            ),
+        ] {
+            if let Some(value) = value
+                && value.trim().is_empty()
+            {
+                errors.push(format!(
+                    "rules.toml {} must not be blank when present.",
+                    field_name
+                ));
+            }
+        }
+
+        for location_id in &rules.finale_secured_location_ids {
+            if location_id.trim().is_empty() {
+                errors.push(
+                    "rules.toml finale_secured_location_ids must not contain blank ids.".to_owned(),
+                );
+            }
+        }
+
+        if rules.finale_secured_retaliation_reduction < 0 {
+            errors.push(
+                "rules.toml finale_secured_retaliation_reduction must not be negative.".to_owned(),
+            );
+        }
     }
 
     if let Some(locations) = &locations {
@@ -449,6 +602,106 @@ fn load_datapack_bundle_from_path(
                     location.id
                 ));
             }
+            for line in &location.movement_context_lines {
+                if line.trim().is_empty() {
+                    errors.push(format!(
+                        "Location '{}' must not define blank movement_context_lines entries.",
+                        location.id
+                    ));
+                }
+            }
+            for (field_name, value) in [
+                ("route_note", location.route_note.as_deref()),
+                (
+                    "threat_forecast_locked",
+                    location.threat_forecast_locked.as_deref(),
+                ),
+                (
+                    "threat_forecast_cleared",
+                    location.threat_forecast_cleared.as_deref(),
+                ),
+                (
+                    "threat_forecast_barricaded",
+                    location.threat_forecast_barricaded.as_deref(),
+                ),
+                (
+                    "threat_forecast_open",
+                    location.threat_forecast_open.as_deref(),
+                ),
+                (
+                    "threat_forecast_boss_live",
+                    location.threat_forecast_boss_live.as_deref(),
+                ),
+                (
+                    "threat_forecast_boss_secured",
+                    location.threat_forecast_boss_secured.as_deref(),
+                ),
+                (
+                    "movement_context_secured_line",
+                    location.movement_context_secured_line.as_deref(),
+                ),
+                (
+                    "boss_defeated_objective_line",
+                    location.boss_defeated_objective_line.as_deref(),
+                ),
+                (
+                    "boss_retaliation_context_line",
+                    location.boss_retaliation_context_line.as_deref(),
+                ),
+                (
+                    "situation_enemy_cleared_line",
+                    location.situation_enemy_cleared_line.as_deref(),
+                ),
+                (
+                    "situation_barricaded_line",
+                    location.situation_barricaded_line.as_deref(),
+                ),
+                (
+                    "situation_high_noise_line",
+                    location.situation_high_noise_line.as_deref(),
+                ),
+                (
+                    "situation_boss_wounded_secured_line",
+                    location.situation_boss_wounded_secured_line.as_deref(),
+                ),
+                (
+                    "situation_boss_wounded_line",
+                    location.situation_boss_wounded_line.as_deref(),
+                ),
+                (
+                    "situation_boss_secured_line",
+                    location.situation_boss_secured_line.as_deref(),
+                ),
+                (
+                    "situation_boss_partially_secured_line",
+                    location.situation_boss_partially_secured_line.as_deref(),
+                ),
+                (
+                    "passive_pressure_enemy_id",
+                    location.passive_pressure_enemy_id.as_deref(),
+                ),
+                (
+                    "passive_pressure_blocked_line",
+                    location.passive_pressure_blocked_line.as_deref(),
+                ),
+                (
+                    "passive_pressure_damage_line",
+                    location.passive_pressure_damage_line.as_deref(),
+                ),
+                (
+                    "passive_pressure_high_noise_line",
+                    location.passive_pressure_high_noise_line.as_deref(),
+                ),
+            ] {
+                if let Some(value) = value
+                    && value.trim().is_empty()
+                {
+                    errors.push(format!(
+                        "Location '{}' must not define a blank {}.",
+                        location.id, field_name
+                    ));
+                }
+            }
         }
     }
     if let Some(items) = &items {
@@ -468,15 +721,124 @@ fn load_datapack_bundle_from_path(
                     )),
                 }
             }
+            for line in &item.inspect_lines {
+                if line.trim().is_empty() {
+                    errors.push(format!(
+                        "Item '{}' must not define blank inspect_lines entries.",
+                        item.id
+                    ));
+                }
+            }
+            for (field_name, value) in [
+                (
+                    "objective_required_line",
+                    item.objective_required_line.as_deref(),
+                ),
+                (
+                    "objective_not_required_line",
+                    item.objective_not_required_line.as_deref(),
+                ),
+                ("pickup_line", item.pickup_line.as_deref()),
+                ("utility_success_line", item.utility_success_line.as_deref()),
+                ("utility_empty_line", item.utility_empty_line.as_deref()),
+            ] {
+                if let Some(value) = value
+                    && value.trim().is_empty()
+                {
+                    errors.push(format!(
+                        "Item '{}' must not define a blank {}.",
+                        item.id, field_name
+                    ));
+                }
+            }
         }
     }
     if let Some(enemies) = &enemies {
         validate_unique_ids("enemies", &enemies.enemies, &mut errors);
         validate_non_blank_names("enemies", &enemies.enemies, &mut errors);
+        for enemy in &enemies.enemies {
+            for (field_name, value) in [
+                ("retaliation_line", enemy.retaliation_line.as_deref()),
+                ("defeat_line", enemy.defeat_line.as_deref()),
+                ("inspect_alive_line", enemy.inspect_alive_line.as_deref()),
+                (
+                    "inspect_defeated_line",
+                    enemy.inspect_defeated_line.as_deref(),
+                ),
+            ] {
+                if let Some(value) = value
+                    && value.trim().is_empty()
+                {
+                    errors.push(format!(
+                        "Enemy '{}' must not define a blank {}.",
+                        enemy.id, field_name
+                    ));
+                }
+            }
+        }
     }
     if let Some(bosses) = &bosses {
         validate_unique_ids("bosses", &bosses.bosses, &mut errors);
         validate_non_blank_names("bosses", &bosses.bosses, &mut errors);
+        for boss in &bosses.bosses {
+            if let Some(threshold) = boss.wounded_phase_hp_threshold {
+                if threshold <= 0 {
+                    errors.push(format!(
+                        "Boss '{}' wounded_phase_hp_threshold must be greater than 0.",
+                        boss.id
+                    ));
+                }
+                if threshold >= boss.hp {
+                    errors.push(format!(
+                        "Boss '{}' wounded_phase_hp_threshold must be lower than boss hp.",
+                        boss.id
+                    ));
+                }
+            }
+            if boss.wounded_phase_damage_bonus < 0 {
+                errors.push(format!(
+                    "Boss '{}' wounded_phase_damage_bonus must not be negative.",
+                    boss.id
+                ));
+            }
+            for (field_name, value) in [
+                ("defeat_line", boss.defeat_line.as_deref()),
+                ("retaliation_line", boss.retaliation_line.as_deref()),
+                (
+                    "finale_security_retaliation_line",
+                    boss.finale_security_retaliation_line.as_deref(),
+                ),
+                (
+                    "wounded_phase_combat_line",
+                    boss.wounded_phase_combat_line.as_deref(),
+                ),
+                (
+                    "wounded_phase_retaliation_line",
+                    boss.wounded_phase_retaliation_line.as_deref(),
+                ),
+                (
+                    "wounded_phase_inspect_active",
+                    boss.wounded_phase_inspect_active.as_deref(),
+                ),
+                (
+                    "wounded_phase_inspect_pending",
+                    boss.wounded_phase_inspect_pending.as_deref(),
+                ),
+                (
+                    "wounded_phase_inspect_defeated",
+                    boss.wounded_phase_inspect_defeated.as_deref(),
+                ),
+            ] {
+                if let Some(value) = value
+                    && value.trim().is_empty()
+                {
+                    errors.push(format!(
+                        "Boss '{}' must not define a blank {}.",
+                        boss.id, field_name
+                    ));
+                }
+            }
+        }
     }
     if let Some(objectives) = &objectives {
         validate_unique_ids("objectives", &objectives.objectives, &mut errors);
@@ -494,6 +856,29 @@ fn load_datapack_bundle_from_path(
                 "rules.toml starting_location '{}' was not found in templates/locations.toml.",
                 rules.starting_location
             ));
+        }
+
+        if let Some(location_id) = rules
+            .finale_target_location_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            && !known_locations.contains(location_id)
+        {
+            errors.push(format!(
+                "rules.toml finale_target_location_id '{}' was not found in templates/locations.toml.",
+                location_id
+            ));
+        }
+
+        for location_id in &rules.finale_secured_location_ids {
+            let location_id = location_id.trim();
+            if !location_id.is_empty() && !known_locations.contains(location_id) {
+                errors.push(format!(
+                    "rules.toml finale_secured_location_ids references unknown location '{}'.",
+                    location_id
+                ));
+            }
         }
 
         for location in &locations.locations {
@@ -622,6 +1007,18 @@ fn load_datapack_bundle_from_path(
                     ));
                 }
             }
+            if let Some(enemy_id) = location
+                .passive_pressure_enemy_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                && !known_enemies.contains(enemy_id)
+            {
+                errors.push(format!(
+                    "Location '{}' references unknown passive_pressure_enemy_id '{}'.",
+                    location.id, enemy_id
+                ));
+            }
         }
     }
 
@@ -631,6 +1028,20 @@ fn load_datapack_bundle_from_path(
             .iter()
             .map(|entry| entry.id.as_str())
             .collect();
+        if let Some(rules) = &rules
+            && let Some(boss_id) = rules
+                .finale_boss_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            && !known_bosses.contains(boss_id)
+        {
+            errors.push(format!(
+                "rules.toml finale_boss_id '{}' was not found in templates/bosses.toml.",
+                boss_id
+            ));
+        }
+
         for location in &locations.locations {
             for boss_id in &location.bosses {
                 if !known_bosses.contains(boss_id.as_str()) {
@@ -1123,6 +1534,41 @@ damage = 1
     }
 
     #[test]
+    fn station_smoke_test_is_discoverable_and_loads_with_distinct_ids() {
+        let catalog = discover_datapacks();
+        let record = catalog
+            .valid
+            .iter()
+            .find(|record| record.folder_name == "station_smoke_test")
+            .expect("expected station_smoke_test datapack to be discoverable");
+
+        assert_eq!(record.summary.display_name, "Station Smoke Test");
+        assert_eq!(record.summary.location_count, 2);
+        assert_eq!(record.summary.item_count, 1);
+        assert_eq!(record.summary.enemy_count, 1);
+        assert_eq!(record.summary.boss_count, 1);
+        assert_eq!(record.summary.objective_count, 1);
+        assert_eq!(record.summary.media_reference_count, 0);
+
+        let bundle = load_datapack_bundle_by_folder("station_smoke_test")
+            .expect("expected station_smoke_test bundle to load");
+        assert_eq!(bundle.pack.id, "station_smoke_test");
+        assert_eq!(bundle.rules.starting_location, "station_platform");
+        assert_eq!(bundle.rules.spawned_enemy_movement_policy, "random");
+        assert_eq!(
+            bundle.objectives[0].required_location_id.as_deref(),
+            Some("signal_box")
+        );
+        assert!(bundle.items.iter().any(|item| item.id == "brass_token"));
+        assert!(
+            bundle
+                .enemies
+                .iter()
+                .any(|enemy| enemy.id == "static_guard" && !enemy.can_hear)
+        );
+    }
+
+    #[test]
     fn property_siege_classic_bundle_loads_with_expected_templates() {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
@@ -1132,6 +1578,44 @@ damage = 1
         assert_eq!(bundle.rules.sight_acquire_chance_percent, 70);
         assert_eq!(bundle.rules.sight_chase_delay_chance_percent, 35);
         assert_eq!(bundle.rules.spawned_hazard_break_chance_percent, 35);
+        assert_eq!(
+            bundle.rules.spawned_enemy_movement_policy,
+            "path_to_attractor"
+        );
+        assert!(
+            bundle
+                .rules
+                .starter_hint_line
+                .as_deref()
+                .is_some_and(|line| line.contains("go garage"))
+        );
+        assert_eq!(
+            bundle.rules.finale_target_location_id.as_deref(),
+            Some("garage")
+        );
+        assert_eq!(
+            bundle.rules.finale_boss_id.as_deref(),
+            Some("brute_in_garage")
+        );
+        assert_eq!(
+            bundle.rules.finale_secured_location_ids,
+            vec!["front_verandah".to_owned(), "back_garden".to_owned()]
+        );
+        assert_eq!(bundle.rules.finale_secured_retaliation_reduction, 1);
+        assert!(
+            bundle
+                .rules
+                .finale_security_secured_line
+                .as_deref()
+                .is_some_and(|line| line.contains("garage retaliation"))
+        );
+        assert!(
+            bundle
+                .rules
+                .finale_security_unsecured_line
+                .as_deref()
+                .is_some_and(|line| line.contains("{required_locations}"))
+        );
         assert!(
             bundle
                 .locations
@@ -1140,6 +1624,29 @@ damage = 1
         );
         assert!(bundle.items.iter().any(|item| item.id == "cricket_bat"));
         assert!(bundle.items.iter().any(|item| item.id == "barricade_kit"));
+        let house_keys = bundle
+            .items
+            .iter()
+            .find(|item| item.id == "house_keys")
+            .expect("expected house keys template");
+        assert!(
+            house_keys
+                .inspect_lines
+                .iter()
+                .any(|line| line.contains("opens the garage"))
+        );
+        assert!(
+            house_keys
+                .objective_required_line
+                .as_deref()
+                .is_some_and(|line| line.contains("still be holding them"))
+        );
+        assert!(
+            house_keys
+                .pickup_line
+                .as_deref()
+                .is_some_and(|line| line.contains("much heavier"))
+        );
         let shambler = bundle
             .enemies
             .iter()
@@ -1147,6 +1654,30 @@ damage = 1
             .expect("expected shambler template");
         assert!(shambler.can_hear);
         assert!(shambler.can_see);
+        assert!(
+            shambler
+                .retaliation_line
+                .as_deref()
+                .is_some_and(|line| line.contains("full dead weight"))
+        );
+        assert!(
+            shambler
+                .defeat_line
+                .as_deref()
+                .is_some_and(|line| line.contains("front step"))
+        );
+        assert!(
+            shambler
+                .inspect_alive_line
+                .as_deref()
+                .is_some_and(|line| line.contains("direct-pressure lane"))
+        );
+        assert!(
+            shambler
+                .inspect_defeated_line
+                .as_deref()
+                .is_some_and(|line| line.contains("mechanically calmer"))
+        );
         assert_eq!(
             bundle
                 .items
@@ -1155,6 +1686,23 @@ damage = 1
                 .and_then(|item| item.utility_effect.as_deref()),
             Some("reveal_connections")
         );
+        let torch = bundle
+            .items
+            .iter()
+            .find(|item| item.id == "torch")
+            .expect("expected torch template");
+        assert!(
+            torch
+                .utility_success_line
+                .as_deref()
+                .is_some_and(|line| line.contains("sweep the torch"))
+        );
+        assert!(
+            torch
+                .utility_empty_line
+                .as_deref()
+                .is_some_and(|line| line.contains("does not reveal anything new"))
+        );
         let garage_brute = bundle
             .bosses
             .iter()
@@ -1162,6 +1710,32 @@ damage = 1
             .expect("expected garage brute template");
         assert!(garage_brute.can_hear);
         assert!(garage_brute.can_see);
+        assert_eq!(garage_brute.wounded_phase_hp_threshold, Some(4));
+        assert_eq!(garage_brute.wounded_phase_damage_bonus, 1);
+        assert!(
+            garage_brute
+                .wounded_phase_combat_line
+                .as_deref()
+                .is_some_and(|line| line.contains("more dangerous"))
+        );
+        assert!(
+            garage_brute
+                .defeat_line
+                .as_deref()
+                .is_some_and(|line| line.contains("{boss_name} collapses"))
+        );
+        assert!(
+            garage_brute
+                .retaliation_line
+                .as_deref()
+                .is_some_and(|line| line.contains("{damage} damage"))
+        );
+        assert!(
+            garage_brute
+                .finale_security_retaliation_line
+                .as_deref()
+                .is_some_and(|line| line.contains("{reduction}"))
+        );
         assert_eq!(
             bundle.objectives[0].target_boss_id.as_deref(),
             Some("brute_in_garage")
@@ -1193,12 +1767,84 @@ damage = 1
         );
         assert!(garage.locked);
         assert_eq!(garage.unlock_item_id.as_deref(), Some("house_keys"));
+        assert_eq!(
+            garage.threat_forecast_boss_secured.as_deref(),
+            Some("finale is live, but both siege lanes are secured; brute retaliation is reduced")
+        );
+        assert!(
+            garage
+                .movement_context_lines
+                .iter()
+                .any(|line| line.contains("house keys got you this far"))
+        );
+        assert!(
+            garage
+                .boss_defeated_objective_line
+                .as_deref()
+                .is_some_and(|line| line.contains("sounds like a room"))
+        );
+        assert!(
+            garage
+                .boss_retaliation_context_line
+                .as_deref()
+                .is_some_and(|line| line.contains("make mistakes"))
+        );
+        assert!(
+            garage
+                .situation_boss_wounded_secured_line
+                .as_deref()
+                .is_some_and(|line| line.contains("both exposed approaches"))
+        );
+        assert!(
+            garage
+                .situation_boss_partially_secured_line
+                .as_deref()
+                .is_some_and(|line| line.contains("front barricade"))
+        );
         let front_verandah = bundle
             .locations
             .iter()
             .find(|location| location.id == "front_verandah")
             .expect("expected front verandah template");
+        assert!(
+            front_verandah
+                .tags
+                .iter()
+                .any(|tag| tag == "noise_pressure")
+        );
         assert!(front_verandah.barricadable);
+        assert_eq!(
+            front_verandah.route_note.as_deref(),
+            Some("threshold defense against front-gate pressure")
+        );
+        assert!(
+            front_verandah
+                .threat_forecast_open
+                .as_deref()
+                .is_some_and(|line| line.contains("{pressure_damage} HP"))
+        );
+        assert_eq!(
+            front_verandah.passive_pressure_enemy_id.as_deref(),
+            Some("shambler_front_gate")
+        );
+        assert!(
+            front_verandah
+                .passive_pressure_damage_line
+                .as_deref()
+                .is_some_and(|line| line.contains("threshold"))
+        );
+        assert!(
+            front_verandah
+                .situation_enemy_cleared_line
+                .as_deref()
+                .is_some_and(|line| line.contains("belongs to you"))
+        );
+        assert!(
+            front_verandah
+                .situation_high_noise_line
+                .as_deref()
+                .is_some_and(|line| line.contains("front step"))
+        );
         assert_eq!(
             front_verandah.barricade_item_id.as_deref(),
             Some("barricade_kit")
@@ -1210,9 +1856,32 @@ damage = 1
             .iter()
             .find(|location| location.id == "back_garden")
             .expect("expected back garden template");
+        assert!(back_garden.tags.iter().any(|tag| tag == "noise_pressure"));
+        assert!(
+            back_garden
+                .route_note
+                .as_deref()
+                .is_some_and(|line| line.contains("{barricade_heal} HP"))
+        );
         assert!(back_garden.locked);
         assert_eq!(back_garden.unlock_item_id.as_deref(), Some("house_keys"));
         assert!(back_garden.barricadable);
+        assert_eq!(
+            back_garden.passive_pressure_enemy_id.as_deref(),
+            Some("crawler_in_weeds")
+        );
+        assert!(
+            back_garden
+                .passive_pressure_blocked_line
+                .as_deref()
+                .is_some_and(|line| line.contains("back barricade"))
+        );
+        assert!(
+            back_garden
+                .situation_barricaded_line
+                .as_deref()
+                .is_some_and(|line| line.contains("{barricade_heal} HP"))
+        );
         assert_eq!(
             back_garden.barricade_item_id.as_deref(),
             Some("barricade_kit")
@@ -1221,6 +1890,432 @@ damage = 1
         assert!(!back_garden.barricade_blocks_retaliation);
         assert_eq!(back_garden.barricade_attack_bonus, 0);
         assert_eq!(back_garden.items, vec!["barricade_kit".to_owned()]);
+    }
+
+    #[test]
+    fn rules_validation_rejects_unknown_finale_references() {
+        let dir = TempDatapackDir::new("rules_unknown_finale_refs");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "rules.toml",
+            r#"scenario_id = "test_pack"
+starting_location = "start"
+boundary_mode = "scenario_blocked"
+objective_mode = "single_frozen_objective"
+finale_target_location_id = "missing_room"
+finale_boss_id = "missing_boss"
+finale_secured_location_ids = ["start", "missing_lane"]
+finale_secured_retaliation_reduction = 1
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("finale_target_location_id 'missing_room' was not found")
+        }));
+        assert!(errors.iter().any(|error| {
+            error.contains("finale_secured_location_ids references unknown location 'missing_lane'")
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("finale_boss_id 'missing_boss' was not found"))
+        );
+    }
+
+    #[test]
+    fn rules_validation_rejects_negative_finale_reduction() {
+        let dir = TempDatapackDir::new("rules_negative_finale_reduction");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "rules.toml",
+            r#"scenario_id = "test_pack"
+starting_location = "start"
+boundary_mode = "scenario_blocked"
+objective_mode = "single_frozen_objective"
+finale_target_location_id = "start"
+finale_boss_id = "test_boss"
+finale_secured_location_ids = ["start"]
+finale_secured_retaliation_reduction = -1
+finale_security_secured_line = ""
+finale_security_unsecured_line = ""
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("finale_secured_retaliation_reduction must not be negative")
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("finale_security_secured_line must not be blank"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("finale_security_unsecured_line must not be blank"))
+        );
+    }
+
+    #[test]
+    fn rules_validation_rejects_invalid_spawned_enemy_movement_policy() {
+        let dir = TempDatapackDir::new("rules_invalid_spawned_enemy_movement_policy");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "rules.toml",
+            r#"scenario_id = "test_pack"
+starting_location = "start"
+boundary_mode = "scenario_blocked"
+objective_mode = "single_frozen_objective"
+spawned_enemy_movement_policy = "teleport"
+starter_hint_line = ""
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("spawned_enemy_movement_policy 'teleport' is not supported")
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("starter_hint_line must not be blank"))
+        );
+    }
+
+    #[test]
+    fn boss_validation_rejects_invalid_wounded_phase_fields() {
+        let dir = TempDatapackDir::new("boss_invalid_wounded_phase");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/bosses.toml",
+            r#"[[bosses]]
+id = "test_boss"
+name = "Test Boss"
+description = "A boss."
+tags = ["boss"]
+hp = 4
+damage = 1
+defeat_line = ""
+retaliation_line = ""
+finale_security_retaliation_line = ""
+wounded_phase_hp_threshold = 4
+wounded_phase_damage_bonus = -1
+wounded_phase_combat_line = ""
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("wounded_phase_hp_threshold must be lower than boss hp")
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("wounded_phase_damage_bonus must not be negative") })
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank wounded_phase_combat_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank defeat_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank retaliation_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("blank finale_security_retaliation_line") })
+        );
+    }
+
+    #[test]
+    fn enemy_validation_rejects_blank_flavor_hook_fields() {
+        let dir = TempDatapackDir::new("enemy_blank_flavor_hooks");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/enemies.toml",
+            r#"[[enemies]]
+id = "test_enemy"
+name = "Test Enemy"
+description = "An enemy."
+tags = ["melee"]
+hp = 1
+damage = 1
+retaliation_line = ""
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank retaliation_line"))
+        );
+    }
+
+    #[test]
+    fn item_validation_rejects_blank_flavor_hook_fields() {
+        let dir = TempDatapackDir::new("item_blank_flavor_hooks");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/items.toml",
+            r#"[[items]]
+id = "test_item"
+name = "Test Item"
+description = "An item."
+tags = ["utility"]
+inspect_lines = [""]
+objective_required_line = ""
+pickup_line = ""
+utility_success_line = ""
+utility_empty_line = ""
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| { error.contains("must not define blank inspect_lines entries") })
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank objective_required_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank pickup_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank utility_success_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank utility_empty_line"))
+        );
+    }
+
+    #[test]
+    fn location_validation_rejects_blank_context_hook_fields() {
+        let dir = TempDatapackDir::new("location_blank_context_hooks");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+tags = ["start"]
+connections = []
+route_note = ""
+threat_forecast_open = ""
+movement_context_lines = [""]
+boss_defeated_objective_line = ""
+boss_retaliation_context_line = ""
+situation_enemy_cleared_line = ""
+situation_barricaded_line = ""
+situation_high_noise_line = ""
+situation_boss_wounded_secured_line = ""
+situation_boss_wounded_line = ""
+situation_boss_secured_line = ""
+situation_boss_partially_secured_line = ""
+passive_pressure_enemy_id = ""
+passive_pressure_blocked_line = ""
+passive_pressure_damage_line = ""
+passive_pressure_high_noise_line = ""
+items = []
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank route_note"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank threat_forecast_open"))
+        );
+        assert!(errors.iter().any(|error| {
+            error.contains("must not define blank movement_context_lines entries")
+        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank boss_defeated_objective_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank boss_retaliation_context_line"))
+        );
+        for field_name in [
+            "situation_enemy_cleared_line",
+            "situation_barricaded_line",
+            "situation_high_noise_line",
+            "situation_boss_wounded_secured_line",
+            "situation_boss_wounded_line",
+            "situation_boss_secured_line",
+            "situation_boss_partially_secured_line",
+        ] {
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| error.contains(&format!("blank {}", field_name))),
+                "expected blank validation error for {field_name}"
+            );
+        }
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank passive_pressure_enemy_id"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank passive_pressure_blocked_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank passive_pressure_damage_line"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("blank passive_pressure_high_noise_line"))
+        );
+    }
+
+    #[test]
+    fn location_validation_rejects_unknown_passive_pressure_enemy() {
+        let dir = TempDatapackDir::new("location_unknown_passive_pressure_enemy");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Valid Objective"
+description = "Valid objective."
+tags = ["test"]
+target_boss_id = "test_boss"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+tags = ["start"]
+connections = []
+passive_pressure_enemy_id = "missing_enemy"
+items = []
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "temp_test_pack")
+            .expect_err("expected datapack validation to fail");
+
+        assert!(errors.iter().any(|error| {
+            error.contains("references unknown passive_pressure_enemy_id 'missing_enemy'")
+        }));
     }
 
     #[test]

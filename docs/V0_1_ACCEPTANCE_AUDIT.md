@@ -23,9 +23,9 @@ Meaning:
 
 Automated evidence:
 
-- `cargo test` passes with `75` passing tests
+- `cargo test` passes with `105` passing tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
-- tests cover datapack discovery, command boundary parsing, multi-gate locked progression, broken-open gate state, barricade validation, two-room barricade pressure behavior, noise escalation, noise attractor retargeting, max-noise enemy spawning, spawned-enemy movement blockers and hazard attacks, threat forecasting, utility-effect item behavior, utility/security truth surfacing, objective-condition feedback, objective-condition name surfacing, sidebar objective-progress surfacing, reducer behavior, post-win epilogue hooks, epilogue hook UI surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, UI-derived recommendation behavior, and save/load roundtrip
+- tests cover datapack discovery, command boundary parsing, engine/scenario boundary guarding, multi-gate locked progression, broken-open gate state, barricade validation, finale-security rule validation, location/item/enemy flavor hook validation, two-room barricade pressure behavior, noise escalation, noise attractor retargeting, max-noise enemy spawning, spawned-enemy movement blockers and hazard attacks, threat forecasting, utility-effect item behavior, utility/security truth surfacing, objective-condition feedback, objective-condition name surfacing, sidebar objective-progress surfacing, reducer behavior, post-win epilogue hooks, epilogue hook UI surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, UI-derived recommendation behavior, and save/load roundtrip
 
 ## Acceptance Grid
 
@@ -153,7 +153,7 @@ Status: `pass`
 Evidence:
 
 - deterministic attack handling lives in [src/game/reducer.rs](../src/game/reducer.rs#L261)
-- tests verify boss combat damage, retaliation, alive/defeated state changes, objective progression, wounded-phase escalation, and the secured-property retaliation reduction when both siege lanes are barricaded
+- tests verify boss combat damage, retaliation, alive/defeated state changes, objective progression, template-authored wounded-phase escalation, datapack-authored enemy flavor hooks, and the datapack-authored secured-property retaliation reduction
 
 ### Objective Progress
 
@@ -185,7 +185,8 @@ Status: `pass`
 Evidence:
 
 - save/load runtime path lives in [src/runtime/mod.rs](../src/runtime/mod.rs#L7)
-- tests verify roundtrip preservation of location, HP, inventory length, equipped item, objective condition state, locked gate state, barricaded room state, and noise state
+- tests verify roundtrip preservation of location, HP, inventory length, equipped item, objective condition state, locked gate state, barricaded room state, turn index, and noise state
+- tests verify save payload parsing rejects unsupported future versions while preserving missing-version compatibility as `v1`
 - app save/load shell wiring lives in [src/app.rs](../src/app.rs#L430)
 
 ### Validation Errors

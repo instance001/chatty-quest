@@ -173,7 +173,7 @@ Recommended targets:
 Current branch status:
 
 - first pass complete
-- the `Garage Brute` now enters a wounded end phase at low HP, hits harder, and surfaces explicit finale text
+- the `Garage Brute` now enters a template-authored wounded end phase at low HP, hits harder, and surfaces explicit finale text
 - garage room text also reflects that wounded-state escalation so the player can read the phase change instead of only inferring it from damage
 - if both `front_verandah` and `back_garden` are barricaded before the garage fight, brute retaliation is reduced by `1` and the sidebar/inspection text surfaces that the property has been secured
 - after the objective is complete, the current branch now keeps the run open in an epilogue-friendly mode: exploration and inspection remain available, combat, pressure, and resource mutation are paused, and locations can provide optional datapack-authored `epilogue_description` text plus sidebar/media-surfaced `epilogue_hook` post-credits seeds

@@ -1,0 +1,12 @@
+[[bosses]]
+id = "ticket_wraith"
+name = "Ticket Wraith"
+description = "A translucent inspector with too many punched tickets where its face should be."
+narrator_brief = "Play it as officious, brittle, and barely supernatural because bureaucracy did most of the work already."
+tags = ["boss", "apparition"]
+can_hear = true
+can_see = true
+hp = 2
+damage = 1
+defeat_line = "{boss_name} tears down the middle like an invalid receipt."
+retaliation_line = "The boss clips back for {damage} damage."

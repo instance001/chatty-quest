@@ -8,6 +8,16 @@ can_hear = true
 can_see = true
 hp = 8
 damage = 3
+defeat_line = "{boss_name} collapses. The worst thing on the block is finished."
+retaliation_line = "The boss smashes back for {damage} damage."
+finale_security_retaliation_line = "With both exposed approaches barricaded, the garage fight stops feeling like the whole property is joining in. Retaliation reduced by {reduction}."
+wounded_phase_hp_threshold = 4
+wounded_phase_damage_bonus = 1
+wounded_phase_combat_line = "The brute stumbles, resets, and somehow becomes more dangerous once it realizes it should already be dead."
+wounded_phase_retaliation_line = "Final-phase pressure: the brute is hitting harder now that the room smells like an ending."
+wounded_phase_inspect_active = "Final phase: wounded and swinging harder than the opening exchange."
+wounded_phase_inspect_pending = "Final phase: not yet. Once this thing is bloodied, the garage gets nastier in a hurry."
+wounded_phase_inspect_defeated = "Final phase: over. The garage is no longer an active boss room."
 
 [bosses.media]
 image = "media/images/bosses/garage_brute.png"

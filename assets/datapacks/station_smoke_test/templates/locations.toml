@@ -1,0 +1,23 @@
+[[locations]]
+id = "station_platform"
+name = "Station Platform"
+description = "An empty platform under humming lights, clean enough to feel staged."
+epilogue_description = "The platform is still empty, but it has stopped feeling like it is waiting for your paperwork."
+narrator_brief = "Make the platform sparse, civic, and a little too well lit."
+tags = ["outdoor", "starting_location", "transit"]
+connections = ["signal_box"]
+items = ["brass_token"]
+enemies = []
+bosses = []
+
+[[locations]]
+id = "signal_box"
+name = "Signal Box"
+description = "A cramped control room where every switch looks accused of something."
+epilogue_description = "The signal box returns to being merely old equipment and bad dust."
+narrator_brief = "Make the room feel procedural and haunted by maintenance logs."
+tags = ["indoor", "objective_target"]
+connections = ["station_platform"]
+items = []
+enemies = ["static_guard"]
+bosses = ["ticket_wraith"]

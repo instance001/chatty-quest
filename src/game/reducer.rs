@@ -5,8 +5,12 @@ use crate::data::datapacks::DatapackBundle;
 use super::actions::{
     ActionOutcome, EncounterKind, GameAction, GameEvent, ItemUseEffect, MovementHazardKind,
 };
+use super::derived::{
+    boss_wounded_phase_active, boss_wounded_phase_damage_bonus,
+    finale_security_retaliation_reduction,
+};
 use super::queries::{
-    describe_current_location, describe_location, enemy_template_id, equipped_damage, find_boss,
+    describe_current_location, describe_location, equipped_damage, find_boss,
     find_boss_by_name_or_id, find_enemy, find_enemy_by_name_or_id, find_item,
     find_item_by_name_or_id, find_location, find_location_by_name_or_id, is_location_barricaded,
     is_location_locked, matches_name, unlock_targets_for_item,
@@ -23,6 +27,7 @@ pub fn apply_action(
 ) -> ActionOutcome {
     if state.active_objective.completed {
         let outcome = apply_epilogue_action(state, bundle, action);
+        advance_turn_if_accepted(state, &outcome);
         append_rolling_summary(state, &outcome);
         return outcome;
     }
@@ -55,8 +60,13 @@ pub fn apply_action(
         GameAction::Wait => handle_wait(state, bundle),
     };
 
+    let accepted_turn = !action_was_rejected_or_blocked(&outcome);
+    if accepted_turn {
+        advance_turn_index(state);
+    }
+
     apply_noise_for_action(state, bundle, &action_for_noise, &mut outcome);
-    if state.hp > 0 && !action_was_rejected_or_blocked(&outcome) {
+    if state.hp > 0 && accepted_turn {
         apply_spawned_enemy_turns(state, bundle, &mut outcome);
     }
 
@@ -212,7 +222,7 @@ fn handle_move(state: &mut RunState, bundle: &DatapackBundle, destination: &str)
         format!("You move to {}.", destination_location.name),
         destination_location.description.clone(),
     ];
-    lines.extend(movement_context_lines(state, destination_location));
+    lines.extend(movement_context_lines(state, bundle, destination_location));
 
     ActionOutcome {
         events: vec![GameEvent::Moved {
@@ -248,7 +258,7 @@ fn handle_inspect(state: &RunState, bundle: &DatapackBundle, target: &str) -> Ac
         if !unlock_targets.is_empty() {
             lines.push(format!("Can unlock: {}.", unlock_targets.join(", ")));
         }
-        lines.extend(item_context_lines(state, &item.id));
+        lines.extend(item_context_lines(state, item));
         return ActionOutcome {
             events: vec![GameEvent::Inspected {
                 target: item.id.clone(),
@@ -362,7 +372,9 @@ fn handle_take(state: &mut RunState, bundle: &DatapackBundle, item_name: &str) -
         }],
         lines: {
             let mut lines = vec![format!("You take the {}.", item.name)];
-            lines.extend(item_pickup_lines(&item.id));
+            if let Some(pickup_line) = item.pickup_line.as_deref() {
+                lines.push(pickup_line.to_owned());
+            }
             lines
         },
     }
@@ -485,12 +497,25 @@ fn reveal_connected_locations(
         }
     }
 
+    let item_template = find_item(bundle, &item.id);
     let mut lines = if newly_known.is_empty() {
-        vec!["The torch does not reveal anything new from here.".to_owned()]
+        vec![
+            item_template
+                .and_then(|template| template.utility_empty_line.clone())
+                .unwrap_or_else(|| {
+                    format!("The {} does not reveal anything new from here.", item.name)
+                }),
+        ]
     } else {
         vec![
-            "You sweep the torch across the exits and get a better read on the nearby routes."
-                .to_owned(),
+            item_template
+                .and_then(|template| template.utility_success_line.clone())
+                .unwrap_or_else(|| {
+                    format!(
+                        "You use the {} and get a better read on the nearby routes.",
+                        item.name
+                    )
+                }),
             format!("Newly known routes: {}.", newly_known.join(", ")),
         ]
     };
@@ -825,8 +850,10 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
                 .map(|enemy| enemy.name.clone())
                 .unwrap_or_else(|| enemy_id.clone());
             lines.push(format!("{} goes down.", enemy_name));
-            if let Some(defeat_line) = enemy_defeat_line(enemy_template_id(&enemy_id)) {
-                lines.push(defeat_line.to_owned());
+            if let Some(defeat_line) =
+                find_enemy(bundle, &enemy_id).and_then(|enemy| enemy.defeat_line.clone())
+            {
+                lines.push(defeat_line);
             }
         } else {
             let retaliation_blocked =
@@ -853,9 +880,10 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
                     remaining_hp: state.hp,
                 });
                 lines.push(format!("The enemy hits back for {} damage.", retaliation));
-                if let Some(retaliation_line) = enemy_retaliation_line(enemy_template_id(&enemy_id))
+                if let Some(retaliation_line) =
+                    find_enemy(bundle, &enemy_id).and_then(|enemy| enemy.retaliation_line.clone())
                 {
-                    lines.push(retaliation_line.to_owned());
+                    lines.push(retaliation_line);
                 }
                 lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
             }
@@ -866,10 +894,12 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
 
     if let Some(boss_id) = boss_here {
         let player_damage = equipped_damage(state).max(1);
+        let boss_template = find_boss(bundle, &boss_id);
         let boss_damage = state.boss_hp.entry(boss_id.clone()).or_insert(0);
         *boss_damage -= player_damage;
         let boss_remaining_hp = *boss_damage;
-        let wounded_phase = is_garage_brute_wounded_phase(&boss_id, boss_remaining_hp);
+        let wounded_phase =
+            boss_template.is_some_and(|boss| boss_wounded_phase_active(boss, boss_remaining_hp));
 
         let mut lines = vec![format!("You attack for {} damage.", player_damage)];
         let mut events = vec![GameEvent::AttackResolved {
@@ -888,35 +918,42 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
             let boss_name = find_boss(bundle, &boss_id)
                 .map(|boss| boss.name.clone())
                 .unwrap_or_else(|| boss_id.clone());
-            lines.push(format!(
-                "{} collapses. The worst thing on the block is finished.",
-                boss_name
-            ));
-            if state.current_location_id == "garage"
-                && state.active_objective.required_location_id.as_deref() == Some("garage")
+            lines.push(
+                boss_template
+                    .and_then(|boss| boss.defeat_line.as_deref())
+                    .map(|line| render_boss_combat_line(line, &boss_name, player_damage, 0))
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{} collapses. The worst thing on the block is finished.",
+                            boss_name
+                        )
+                    }),
+            );
+            if state.active_objective.required_location_id.as_deref()
+                == Some(state.current_location_id.as_str())
+                && let Some(line) = find_location(bundle, &state.current_location_id)
+                    .and_then(|location| location.boss_defeated_objective_line.as_deref())
             {
-                lines.push(
-                    "The garage finally sounds like a room again instead of a threat waiting to happen."
-                        .to_owned(),
-                );
+                lines.push(line.to_owned());
             }
         } else {
             if wounded_phase {
                 lines.push(
-                    "The brute stumbles, resets, and somehow becomes more dangerous once it realizes it should already be dead."
-                        .to_owned(),
+                    boss_template
+                        .and_then(|boss| boss.wounded_phase_combat_line.clone())
+                        .unwrap_or_else(|| {
+                            "The boss enters a wounded final phase and becomes more dangerous."
+                                .to_owned()
+                        }),
                 );
             }
             let secured_property_bonus =
-                if boss_id == "brute_in_garage" && property_siege_lanes_secured(state) {
-                    1
-                } else {
-                    0
-                };
-            let retaliation = (find_boss(bundle, &boss_id)
-                .map(|boss| boss.damage)
-                .unwrap_or(2)
-                + if wounded_phase { 1 } else { 0 }
+                finale_security_retaliation_reduction(state, bundle, &boss_id);
+            let wounded_bonus = boss_template
+                .map(boss_wounded_phase_damage_bonus)
+                .filter(|_| wounded_phase)
+                .unwrap_or(0);
+            let retaliation = (boss_template.map(|boss| boss.damage).unwrap_or(2) + wounded_bonus
                 - secured_property_bonus)
                 .max(1);
             state.hp = (state.hp - retaliation).max(0);
@@ -924,23 +961,40 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
                 amount: retaliation,
                 remaining_hp: state.hp,
             });
-            lines.push(format!("The boss smashes back for {} damage.", retaliation));
-            if secured_property_bonus > 0 {
-                lines.push(
-                    "With both exposed approaches barricaded, the garage fight stops feeling like the whole property is joining in. Retaliation reduced by 1."
-                        .to_owned(),
-                );
+            let boss_name = boss_template
+                .map(|boss| boss.name.as_str())
+                .unwrap_or("The boss");
+            lines.push(
+                boss_template
+                    .and_then(|boss| boss.retaliation_line.as_deref())
+                    .map(|line| render_boss_combat_line(line, boss_name, retaliation, 0))
+                    .unwrap_or_else(|| {
+                        format!("The boss smashes back for {} damage.", retaliation)
+                    }),
+            );
+            if secured_property_bonus > 0
+                && let Some(line) =
+                    boss_template.and_then(|boss| boss.finale_security_retaliation_line.as_deref())
+            {
+                lines.push(render_boss_combat_line(
+                    line,
+                    boss_name,
+                    retaliation,
+                    secured_property_bonus,
+                ));
             }
-            if state.current_location_id == "garage" {
-                lines.push(
-                    "There is not enough space in the garage for both of you to make mistakes."
-                        .to_owned(),
-                );
+            if let Some(line) = find_location(bundle, &state.current_location_id)
+                .and_then(|location| location.boss_retaliation_context_line.as_deref())
+            {
+                lines.push(line.to_owned());
             }
             if wounded_phase {
                 lines.push(
-                    "Final-phase pressure: the brute is hitting harder now that the room smells like an ending."
-                        .to_owned(),
+                    boss_template
+                        .and_then(|boss| boss.wounded_phase_retaliation_line.clone())
+                        .unwrap_or_else(|| {
+                            "Final-phase pressure: the boss is hitting harder now.".to_owned()
+                        }),
                 );
             }
             lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
@@ -956,7 +1010,9 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
 }
 
 fn handle_wait(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome {
-    let location_name = find_location(bundle, &state.current_location_id)
+    let location = find_location(bundle, &state.current_location_id);
+    let location_name = location
+        .as_ref()
         .map(|location| location.name.clone())
         .unwrap_or_else(|| state.current_location_id.clone());
 
@@ -968,61 +1024,54 @@ fn handle_wait(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome {
         location_name
     )];
 
-    if state.current_location_id == "front_verandah"
-        && state.enemies_alive.contains("shambler_front_gate")
-    {
-        if is_location_barricaded(state, "front_verandah") {
-            lines.push(
-                "The barricade takes the edge off the front gate pressure. The shambler stays outside and ugly."
-                    .to_owned(),
-            );
-        } else {
-            let pressure = exposed_noise_pressure_damage(state);
-            state.hp = (state.hp - pressure).max(0);
-            events.push(GameEvent::DamageTaken {
-                amount: pressure,
-                remaining_hp: state.hp,
-            });
-            lines.push(
-                "The Front Gate Shambler keeps scraping at the threshold until it costs you blood and patience."
-                    .to_owned(),
-            );
-            if pressure > 1 {
-                lines.push("The extra noise makes the front approach even uglier.".to_owned());
-            }
-            lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
-        }
-    }
-
-    if state.current_location_id == "back_garden"
-        && state.enemies_alive.contains("crawler_in_weeds")
-    {
-        if is_location_barricaded(state, "back_garden") {
-            lines.push(
-                "The back barricade keeps the weeds from becoming a bite problem for one blessed minute."
-                    .to_owned(),
-            );
-        } else {
-            let pressure = exposed_noise_pressure_damage(state);
-            state.hp = (state.hp - pressure).max(0);
-            events.push(GameEvent::DamageTaken {
-                amount: pressure,
-                remaining_hp: state.hp,
-            });
-            lines.push(
-                "Something low and eager keeps testing the weeds until your ankles pay the tax."
-                    .to_owned(),
-            );
-            if pressure > 1 {
-                lines.push(
-                    "The extra noise turns the flank into a worse idea by the second.".to_owned(),
-                );
-            }
-            lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
-        }
+    if let Some(location) = location.as_ref() {
+        apply_location_passive_pressure(state, location, &mut events, &mut lines);
     }
 
     ActionOutcome { events, lines }
+}
+
+fn apply_location_passive_pressure(
+    state: &mut RunState,
+    location: &crate::data::datapacks::LocationTemplate,
+    events: &mut Vec<GameEvent>,
+    lines: &mut Vec<String>,
+) {
+    let Some(enemy_id) = location.passive_pressure_enemy_id.as_deref() else {
+        return;
+    };
+    if !state.enemies_alive.contains(enemy_id) {
+        return;
+    }
+
+    if is_location_barricaded(state, &location.id) {
+        if let Some(line) = location.passive_pressure_blocked_line.as_deref() {
+            lines.push(line.to_owned());
+        }
+        return;
+    }
+
+    let pressure = exposed_noise_pressure_damage(state);
+    state.hp = (state.hp - pressure).max(0);
+    events.push(GameEvent::DamageTaken {
+        amount: pressure,
+        remaining_hp: state.hp,
+    });
+    if let Some(line) = location.passive_pressure_damage_line.as_deref() {
+        lines.push(line.to_owned());
+    }
+    if pressure > 1
+        && let Some(line) = location.passive_pressure_high_noise_line.as_deref()
+    {
+        lines.push(line.to_owned());
+    }
+    lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
+}
+
+fn render_boss_combat_line(line: &str, boss_name: &str, damage: i32, reduction: i32) -> String {
+    line.replace("{boss_name}", boss_name)
+        .replace("{damage}", &damage.to_string())
+        .replace("{reduction}", &reduction.to_string())
 }
 
 fn apply_noise_for_action(
@@ -1066,6 +1115,16 @@ fn action_was_rejected_or_blocked(outcome: &ActionOutcome) -> bool {
             GameEvent::ActionRejected { .. } | GameEvent::MovementBlocked { .. }
         )
     })
+}
+
+fn advance_turn_if_accepted(state: &mut RunState, outcome: &ActionOutcome) {
+    if !action_was_rejected_or_blocked(outcome) {
+        advance_turn_index(state);
+    }
+}
+
+fn advance_turn_index(state: &mut RunState) {
+    state.turn_index = state.turn_index.saturating_add(1);
 }
 
 fn raise_noise(
@@ -1569,7 +1628,7 @@ fn spawned_enemy_next_step(
         });
     }
 
-    if state.datapack_id == "property_siege_classic" {
+    if spawned_enemy_uses_path_to_attractor(bundle) {
         if let Some(hazard) = next_blocking_hazard_toward_target(
             state,
             bundle,
@@ -1671,7 +1730,7 @@ fn spawned_enemy_return_step(
             current_location_id,
         ));
     }
-    if state.datapack_id == "property_siege_classic" {
+    if spawned_enemy_uses_path_to_attractor(bundle) {
         if let Some(hazard) = next_blocking_hazard_toward_target(
             state,
             bundle,
@@ -1774,11 +1833,7 @@ fn deterministic_hazard_break_roll(
 ) -> u8 {
     let seed = format!(
         "{}:{}:{}:{}:{}",
-        enemy_id,
-        hazard_location_id,
-        state.noise_spawn_count,
-        state.rolling_summary.len(),
-        state.noise_level
+        enemy_id, hazard_location_id, state.noise_spawn_count, state.turn_index, state.noise_level
     );
     (seed.bytes().fold(0usize, |accumulator, byte| {
         accumulator.wrapping_mul(33).wrapping_add(byte as usize)
@@ -1787,6 +1842,10 @@ fn deterministic_hazard_break_roll(
 
 fn spawned_hazard_break_chance_percent(bundle: &DatapackBundle) -> u8 {
     bundle.rules.spawned_hazard_break_chance_percent.min(100)
+}
+
+fn spawned_enemy_uses_path_to_attractor(bundle: &DatapackBundle) -> bool {
+    bundle.rules.spawned_enemy_movement_policy == "path_to_attractor"
 }
 
 fn sight_acquire_chance_percent(bundle: &DatapackBundle) -> u8 {
@@ -1820,7 +1879,7 @@ fn deterministic_sight_acquire_roll(
         current_location_id,
         attractor.subject_id,
         attractor.location_id,
-        state.rolling_summary.len(),
+        state.turn_index,
         state.noise_spawn_count
     );
     (seed.bytes().fold(0usize, |accumulator, byte| {
@@ -1840,7 +1899,7 @@ fn deterministic_sight_chase_roll(
         current_location_id,
         target_location_id,
         state.current_location_id,
-        state.rolling_summary.len(),
+        state.turn_index,
         state.noise_spawn_count
     );
     (seed.bytes().fold(0usize, |accumulator, byte| {
@@ -2135,10 +2194,10 @@ fn deterministic_noise_index(state: &RunState, len: usize, salt: usize) -> usize
         .fold(0usize, |accumulator, byte| {
             accumulator.wrapping_mul(31).wrapping_add(byte as usize)
         });
-    let summary_score = state.rolling_summary.len().wrapping_mul(13);
+    let turn_score = (state.turn_index as usize).wrapping_mul(13);
     let spawn_score = (state.noise_spawn_count as usize).wrapping_mul(37);
     location_score
-        .wrapping_add(summary_score)
+        .wrapping_add(turn_score)
         .wrapping_add(spawn_score)
         .wrapping_add(salt)
         % len
@@ -2167,42 +2226,11 @@ fn exposed_noise_retaliation_bonus(
     };
     if state.noise_level >= 2
         && !state.barricaded_locations.contains(location_id)
-        && (location.id == "front_verandah" || location.id == "back_garden")
+        && location.tags.iter().any(|tag| tag == "noise_pressure")
     {
         1
     } else {
         0
-    }
-}
-
-fn is_garage_brute_wounded_phase(boss_id: &str, remaining_hp: i32) -> bool {
-    boss_id == "brute_in_garage" && remaining_hp > 0 && remaining_hp <= 4
-}
-
-fn property_siege_lanes_secured(state: &RunState) -> bool {
-    state.barricaded_locations.contains("front_verandah")
-        && state.barricaded_locations.contains("back_garden")
-}
-
-fn enemy_retaliation_line(enemy_id: &str) -> Option<&'static str> {
-    match enemy_id {
-        "shambler_front_gate" => Some(
-            "It keeps leaning its full dead weight into the threshold like the house personally offended it.",
-        ),
-        "crawler_in_weeds" => {
-            Some("It comes in low and hateful, exactly where your attention keeps failing first.")
-        }
-        _ => None,
-    }
-}
-
-fn enemy_defeat_line(enemy_id: &str) -> Option<&'static str> {
-    match enemy_id {
-        "shambler_front_gate" => {
-            Some("The front step stops feeling argued with for the first time all night.")
-        }
-        "crawler_in_weeds" => Some("The weeds go back to being weeds, which is somehow a relief."),
-        _ => None,
     }
 }
 
@@ -2234,70 +2262,52 @@ fn update_objective_completion(state: &mut RunState) -> bool {
 
 fn movement_context_lines(
     state: &RunState,
+    bundle: &DatapackBundle,
     location: &crate::data::datapacks::LocationTemplate,
 ) -> Vec<String> {
     let mut lines = Vec::new();
 
-    if location.id == "garage" {
-        let boss_alive = state
-            .location_bosses
-            .get("garage")
-            .into_iter()
-            .flatten()
-            .any(|boss_id| state.bosses_alive.contains(boss_id));
+    let boss_alive = state
+        .location_bosses
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .any(|boss_id| state.bosses_alive.contains(boss_id));
 
-        if boss_alive {
-            lines.push(
-                "Objective pressure: the house keys got you this far; the brute is the part that still has to be earned."
-                    .to_owned(),
-            );
-            if state.barricaded_locations.contains("front_verandah") {
-                lines.push(
-                    "The secured front threshold leaves the fight behind you cleaner than the one ahead."
-                        .to_owned(),
-                );
-            }
+    if boss_alive {
+        lines.extend(location.movement_context_lines.clone());
+        if finale_security_partially_secured(state, bundle)
+            && let Some(line) = location.movement_context_secured_line.as_deref()
+        {
+            lines.push(line.to_owned());
         }
     }
 
     lines
 }
 
-fn item_context_lines(state: &RunState, item_id: &str) -> Vec<String> {
-    match item_id {
-        "house_keys" => vec![
-            "Use case: opens the garage and the chained back gate.".to_owned(),
-            if state.active_objective.required_item_id.as_deref() == Some("house_keys") {
-                "Objective pressure: you do not just need these once, you need to still be holding them at the end.".to_owned()
-            } else {
-                "Ordinary keys, extremely non-ordinary night.".to_owned()
-            },
-        ],
-        "medkit" => vec![
-            "Use case: restores 4 HP, then it is gone.".to_owned(),
-            "This is the run's cleanest recovery spike, so wasting it usually hurts twice."
-                .to_owned(),
-        ],
-        "barricade_kit" => vec![
-            "Use case: secures a barricadable route when used from that location.".to_owned(),
-            "In this scenario, it turns exposed space into breathing room instead of raw safety."
-                .to_owned(),
-        ],
-        _ => Vec::new(),
-    }
+fn finale_security_partially_secured(state: &RunState, bundle: &DatapackBundle) -> bool {
+    bundle
+        .rules
+        .finale_secured_location_ids
+        .iter()
+        .any(|location_id| state.barricaded_locations.contains(location_id))
 }
 
-fn item_pickup_lines(item_id: &str) -> Vec<String> {
-    match item_id {
-        "house_keys" => {
-            vec!["They feel much heavier now that the whole route depends on them.".to_owned()]
-        }
-        "medkit" => vec!["A tiny, crinkling argument against dying stupidly.".to_owned()],
-        "barricade_kit" => {
-            vec!["Not elegant materials, but they are the right kind of ugly.".to_owned()]
-        }
-        _ => Vec::new(),
+fn item_context_lines(
+    state: &RunState,
+    item: &crate::data::datapacks::ItemTemplate,
+) -> Vec<String> {
+    let mut lines = item.inspect_lines.clone();
+    let objective_line = if state.active_objective.required_item_id.as_deref() == Some(&item.id) {
+        item.objective_required_line.as_deref()
+    } else {
+        item.objective_not_required_line.as_deref()
+    };
+    if let Some(objective_line) = objective_line {
+        lines.push(objective_line.to_owned());
     }
+    lines
 }
 
 fn inspect_enemy_state_lines(
@@ -2329,26 +2339,14 @@ fn inspect_enemy_state_lines(
 
     if let Some(enemy) = find_enemy(bundle, enemy_id) {
         lines.push(sense_line(enemy.can_hear, enemy.can_see));
-    }
-
-    match enemy_id {
-        "shambler_front_gate" if alive => lines.push(
-            "Route read: as long as it stands, the front threshold remains the loud direct-pressure lane."
-                .to_owned(),
-        ),
-        "shambler_front_gate" => lines.push(
-            "Route read: the front threshold is mechanically calmer now that the shambler is down."
-                .to_owned(),
-        ),
-        "crawler_in_weeds" if alive => lines.push(
-            "Route read: this is the flank tax; leave it alive and the back edge stays mean."
-                .to_owned(),
-        ),
-        "crawler_in_weeds" => lines.push(
-            "Route read: with the crawler gone, the back route is no longer being actively contested."
-                .to_owned(),
-        ),
-        _ => {}
+        let inspect_line = if alive {
+            enemy.inspect_alive_line.as_deref()
+        } else {
+            enemy.inspect_defeated_line.as_deref()
+        };
+        if let Some(inspect_line) = inspect_line {
+            lines.push(inspect_line.to_owned());
+        }
     }
 
     lines
@@ -2383,18 +2381,26 @@ fn inspect_boss_state_lines(
 
     if let Some(boss) = find_boss(bundle, boss_id) {
         lines.push(sense_line(boss.can_hear, boss.can_see));
-    }
 
-    if is_garage_brute_wounded_phase(boss_id, remaining_hp) {
-        lines
-            .push("Final phase: wounded and swinging harder than the opening exchange.".to_owned());
-    } else if boss_id == "brute_in_garage" && alive {
-        lines.push(
-            "Final phase: not yet. Once this thing is bloodied, the garage gets nastier in a hurry."
-                .to_owned(),
-        );
-    } else if boss_id == "brute_in_garage" {
-        lines.push("Final phase: over. The garage is no longer an active boss room.".to_owned());
+        if boss_wounded_phase_active(boss, remaining_hp) {
+            lines.push(
+                boss.wounded_phase_inspect_active
+                    .clone()
+                    .unwrap_or_else(|| "Final phase: wounded and more dangerous.".to_owned()),
+            );
+        } else if boss.wounded_phase_hp_threshold.is_some() && alive {
+            lines.push(
+                boss.wounded_phase_inspect_pending
+                    .clone()
+                    .unwrap_or_else(|| "Final phase: not yet active.".to_owned()),
+            );
+        } else if boss.wounded_phase_hp_threshold.is_some() {
+            lines.push(
+                boss.wounded_phase_inspect_defeated
+                    .clone()
+                    .unwrap_or_else(|| "Final phase: no longer active.".to_owned()),
+            );
+        }
     }
 
     lines
@@ -2651,7 +2657,10 @@ mod tests {
     };
     use crate::game::generation::generate_new_run;
 
-    use super::{ROLLING_SUMMARY_LIMIT, SpawnedEnemyStep, apply_action, spawned_enemy_next_step};
+    use super::{
+        ROLLING_SUMMARY_LIMIT, SpawnedEnemyStep, advance_turn_index, apply_action,
+        deterministic_hazard_break_roll, spawned_enemy_next_step,
+    };
 
     #[test]
     fn invalid_movement_is_blocked_by_boundary_rules() {
@@ -2676,6 +2685,144 @@ mod tests {
             outcome.lines.first().map(String::as_str),
             Some("You make it three fences before the horde eats you, idiot.")
         );
+    }
+
+    #[test]
+    fn accepted_actions_advance_turn_index_but_blocked_actions_do_not() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        let look = apply_action(&mut state, &bundle, GameAction::Look);
+        assert!(look.events.iter().any(|event| {
+            matches!(event, GameEvent::LocationLooked { location_id } if location_id == "front_verandah")
+        }));
+        assert_eq!(state.turn_index, 1);
+
+        let blocked = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "laundry".to_owned(),
+            },
+        );
+        assert!(
+            blocked
+                .events
+                .iter()
+                .any(|event| matches!(event, GameEvent::MovementBlocked { .. }))
+        );
+        assert_eq!(state.turn_index, 1);
+    }
+
+    #[test]
+    fn station_smoke_test_pack_can_generate_move_fight_and_win() {
+        let bundle = load_datapack_bundle_by_folder("station_smoke_test")
+            .expect("expected station_smoke_test bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+
+        assert_eq!(state.datapack_id, "station_smoke_test");
+        assert_eq!(state.current_location_id, "station_platform");
+        assert_eq!(
+            state.active_objective.required_item_id.as_deref(),
+            Some("brass_token")
+        );
+
+        let take = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Take {
+                item_name: "brass_token".to_owned(),
+            },
+        );
+        assert!(take.events.iter().any(|event| {
+            matches!(event, GameEvent::ItemTaken { item_id } if item_id == "brass_token")
+        }));
+
+        let move_to_signal_box = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "signal_box".to_owned(),
+            },
+        );
+        assert!(move_to_signal_box.events.iter().any(|event| {
+            matches!(event, GameEvent::Moved { to_location_id, .. } if to_location_id == "signal_box")
+        }));
+
+        let clear_guard = apply_action(&mut state, &bundle, GameAction::Attack);
+        assert!(clear_guard.events.iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::AttackResolved {
+                    target_id,
+                    target_kind: EncounterKind::Enemy,
+                    defeated: true,
+                    ..
+                } if target_id == "static_guard"
+            )
+        }));
+
+        let hit_wraith = apply_action(&mut state, &bundle, GameAction::Attack);
+        assert!(hit_wraith.events.iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::AttackResolved {
+                    target_id,
+                    target_kind: EncounterKind::Boss,
+                    defeated: false,
+                    ..
+                } if target_id == "ticket_wraith"
+            )
+        }));
+
+        let defeat_wraith = apply_action(&mut state, &bundle, GameAction::Attack);
+        assert!(defeat_wraith.events.iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::AttackResolved {
+                    target_id,
+                    target_kind: EncounterKind::Boss,
+                    defeated: true,
+                    ..
+                } if target_id == "ticket_wraith"
+            )
+        }));
+        assert!(
+            defeat_wraith
+                .events
+                .iter()
+                .any(|event| matches!(event, GameEvent::ObjectiveCompleted { .. }))
+        );
+        assert!(
+            defeat_wraith
+                .events
+                .iter()
+                .any(|event| matches!(event, GameEvent::RunWon))
+        );
+        assert!(state.active_objective.completed);
+    }
+
+    #[test]
+    fn deterministic_rolls_advance_after_rolling_summary_is_capped() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.noise_spawn_count = 1;
+        state.noise_level = 3;
+        state.rolling_summary = (0..ROLLING_SUMMARY_LIMIT)
+            .map(|index| format!("summary {}", index))
+            .collect();
+        state.turn_index = ROLLING_SUMMARY_LIMIT as u64;
+
+        let first_roll =
+            deterministic_hazard_break_roll(&state, "noise_spawn_1_crawler_in_weeds", "garage");
+        advance_turn_index(&mut state);
+        let second_roll =
+            deterministic_hazard_break_roll(&state, "noise_spawn_1_crawler_in_weeds", "garage");
+
+        assert_eq!(state.rolling_summary.len(), ROLLING_SUMMARY_LIMIT);
+        assert_ne!(first_roll, second_roll);
     }
 
     #[test]
@@ -4193,12 +4340,10 @@ mod tests {
         let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
         let mut acquired = false;
 
-        for summary_len in 0..40 {
+        for turn_index in 0..40 {
             let mut state = generate_new_run(&bundle).state;
             state.current_location_id = "front_verandah".to_owned();
-            state.rolling_summary = (0..summary_len)
-                .map(|index| format!("summary {}", index))
-                .collect();
+            state.turn_index = turn_index;
             state.enemies_alive.insert(enemy_id.clone());
             state.enemy_hp.insert(enemy_id.clone(), 3);
             state
@@ -4469,12 +4614,10 @@ mod tests {
         let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
         let mut miss_outcome = None;
 
-        for summary_len in 0..40 {
+        for turn_index in 0..40 {
             let mut state = generate_new_run(&bundle).state;
             state.current_location_id = "front_verandah".to_owned();
-            state.rolling_summary = (0..summary_len)
-                .map(|index| format!("summary {}", index))
-                .collect();
+            state.turn_index = turn_index;
             state.enemies_alive.insert(enemy_id.clone());
             state.enemy_hp.insert(enemy_id.clone(), 3);
             state
@@ -4620,10 +4763,8 @@ mod tests {
             .insert(enemy_id.clone(), "kitchen".to_owned());
 
         let mut return_step = None;
-        for summary_len in 0..20 {
-            state.rolling_summary = (0..summary_len)
-                .map(|index| format!("summary {}", index))
-                .collect();
+        for turn_index in 0..20 {
+            state.turn_index = turn_index;
             if let SpawnedEnemyStep::Move {
                 to_location_id,
                 step_target_location_id: Some(step_target_location_id),

@@ -54,6 +54,7 @@ pub struct SnapshotLocation {
 pub struct SnapshotPlayerState {
     pub hp: i32,
     pub max_hp: i32,
+    pub turn_index: u64,
     pub noise_level: i32,
     pub run_phase: String,
 }
@@ -190,6 +191,7 @@ pub fn build_run_snapshot_envelope(
             player_state: SnapshotPlayerState {
                 hp: run.hp,
                 max_hp: run.max_hp,
+                turn_index: run.turn_index,
                 noise_level: run.noise_level,
                 run_phase,
             },
@@ -401,6 +403,7 @@ mod tests {
         assert_eq!(envelope.scenario_id, "property_siege_classic");
         assert_eq!(envelope.body.current_location.id, "kitchen");
         assert_eq!(envelope.body.player_state.run_phase, "Active");
+        assert_eq!(envelope.body.player_state.turn_index, 1);
         assert_eq!(envelope.body.objective_state.name, "Secure The Property");
         assert!(
             envelope

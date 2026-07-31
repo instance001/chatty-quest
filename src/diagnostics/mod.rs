@@ -725,7 +725,7 @@ mod tests {
         );
 
         assert!(report.narrator_attached);
-        assert_eq!(report.valid_datapacks, 1);
+        assert!(report.valid_datapacks >= 2);
         assert_eq!(
             report.active_bundle_name.as_deref(),
             Some("Property Siege Classic")

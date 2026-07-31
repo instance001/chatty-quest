@@ -24,7 +24,7 @@ Estimated time: `5-10 minutes`
 
 Expected baseline:
 
-- `cargo test` passes with `75` automated tests
+- `cargo test` passes with `105` automated tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
 - `Property Siege Classic` is the selected datapack
 - setup screen is visible

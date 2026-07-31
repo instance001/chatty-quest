@@ -68,6 +68,8 @@ Example:
 
 The player being unable to leave the property in `Property Siege Classic` is a scenario rule, not a universal engine law.
 
+The test suite includes a live-source boundary guard that scans non-test Rust code for active demo content ids and names. Scenario-specific ids such as demo locations, items, enemies, and bosses should appear in datapack assets, documentation, or test fixtures, not in live engine decisions.
+
 ## Runtime State
 
 Runtime state represents the current truth of a single run.

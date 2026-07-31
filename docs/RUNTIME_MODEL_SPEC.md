@@ -93,6 +93,10 @@ Examples in current `v0.1`:
 - `hp`
 - `max_hp`
 - `active_objective`
+- `turn_index`
+- `noise_level`
+- `noise_spawn_count`
+- spawned-enemy noise, sight, origin, search, and delay state
 - `enemies_alive`
 - `enemies_defeated`
 - `enemy_hp`
@@ -105,6 +109,8 @@ Examples in current `v0.1`:
 - `boundary_response`
 
 This layer is authoritative and serializable.
+
+`turn_index` advances once per accepted player turn, including accepted epilogue exploration. Rejected and movement-blocked commands do not advance it. Deterministic percentage rolls and random-feeling reducer choices may use `turn_index` as a replayable cursor; bounded support memory such as `rolling_summary` must not be used as the only source of roll variation.
 
 ### 3. Support Memory Layer
 
@@ -371,6 +377,7 @@ Save files should serialize canonical runtime truth plus only the support data t
 Must save:
 
 - scenario identity
+- explicit save version
 - canonical state
 - setup metadata that affects truth
 - objective state
@@ -385,8 +392,16 @@ May save:
 
 Must not rely on:
 
+- implicit best-effort parsing of unknown save versions
 - narrator prose replay
 - inferred state from old media focus
+
+Current implementation note:
+
+- `SAVE_VERSION = 1`
+- missing `save_version` fields are treated as `v1` for backward compatibility with early local saves
+- unsupported older placeholders and future save versions fail with explicit load errors
+- migration logic lives in the runtime layer, before a parsed payload is returned to app state
 - reconstructing truth from chat text
 
 ## Narrator Payload Boundary

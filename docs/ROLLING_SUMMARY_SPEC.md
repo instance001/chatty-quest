@@ -27,6 +27,7 @@ Current behavior:
 - reducer output lines are used only as fallback when no event summary exists
 - active-run and epilogue actions both update the summary
 - the summary is capped at `24` lines to keep saves and future context payloads bounded
+- deterministic percentage rolls and random-feeling choices do not use summary length as entropy; accepted turns advance `RunState.turn_index` for replayable roll variation
 
 ## Allowed Inputs
 
@@ -56,6 +57,7 @@ Rolling summary may support:
 Rolling summary may not decide:
 
 - current location
+- turn index or deterministic RNG cursor
 - HP
 - inventory contents
 - lock state
@@ -64,6 +66,12 @@ Rolling summary may not decide:
 - enemy or boss state
 
 If a summary fact becomes mechanically important, it must be promoted into structured state or reducer output.
+
+Related rule:
+
+- `turn_index` is canonical run state
+- `rolling_summary` is bounded support memory
+- changing the summary cap must not change combat, noise, sight, pathing, or hazard-break outcomes
 
 ## Bounded Memory Rule
 

@@ -366,7 +366,7 @@ Current branch reality:
 - two authored siege lanes exist
 - both lanes have distinct local payoffs
 - spawned enemies can now break a barricade in one deterministic hazard-attack event
-- securing both lanes has a small deterministic garage-finale payoff
+- securing the datapack-authored finale-security locations has a small deterministic garage-finale payoff
 - UI, diagnostics, save/load, and reducer coverage all surface or preserve barricade truth
 
 The next barricade work should wait for a concrete content need, such as durability, repair, or additional scenario packs proving that two-state secured/unsecured truth is too small.

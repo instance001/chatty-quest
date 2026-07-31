@@ -123,9 +123,28 @@ Likely `v0.1` responsibilities:
 - objective selection mode
 - combat baseline modifiers if needed
 - sight acquisition, sight chase delay, and spawned hazard break percentages
+- finale-security hooks such as target location, boss id, required secured location ids, and retaliation reduction
 - fail-state or boundary-response text hooks
 
 This is where `Property Siege Classic` should express that the player is trapped on the property. That behavior should not be hidden in engine code.
+
+Current optional rule fields:
+
+- `sight_acquire_chance_percent`
+- `sight_chase_delay_chance_percent`
+- `spawned_hazard_break_chance_percent`
+- `spawned_enemy_movement_policy`
+- `starter_hint_line`
+- `finale_target_location_id`
+- `finale_boss_id`
+- `finale_secured_location_ids`
+- `finale_secured_retaliation_reduction`
+- `finale_security_secured_line`
+- `finale_security_unsecured_line`
+
+`spawned_enemy_movement_policy` controls non-sighted spawned-enemy movement. Supported values are `random` and `path_to_attractor`; older packs default to `random`. `starter_hint_line` is optional startup guidance shown in the initial log, letting scenario packs suggest useful commands without engine-owned item or location ids.
+
+Finale-security fields are generic. A datapack may use them to say that securing one or more locations reduces retaliation from a specific boss in a specific finale location. Referenced boss and location ids are validated when the datapack loads. Security lines may use `{required_locations}` and `{reduction}` placeholders. They are optional, but blank values are rejected.
 
 ## Template Files
 
@@ -186,9 +205,41 @@ Suggested location fields:
 - item slots or placement hints
 - enemy slots or placement hints
 - optional image or ambience references
+- optional route, forecast, and movement context hooks
 - optional context-aware media overrides later
 
 For `v0.1`, the map may be authored or semi-authored. Even so, location data should live in templates rather than being buried in UI code.
+
+Current optional location presentation/context hooks:
+
+- `route_note`
+- `threat_forecast_locked`
+- `threat_forecast_cleared`
+- `threat_forecast_barricaded`
+- `threat_forecast_open`
+- `threat_forecast_boss_live`
+- `threat_forecast_boss_secured`
+- `movement_context_lines`
+- `movement_context_secured_line`
+- `boss_defeated_objective_line`
+- `boss_retaliation_context_line`
+- `situation_enemy_cleared_line`
+- `situation_barricaded_line`
+- `situation_high_noise_line`
+- `situation_boss_wounded_secured_line`
+- `situation_boss_wounded_line`
+- `situation_boss_secured_line`
+- `situation_boss_partially_secured_line`
+- `passive_pressure_enemy_id`
+- `passive_pressure_blocked_line`
+- `passive_pressure_damage_line`
+- `passive_pressure_high_noise_line`
+
+These hooks support route previews, threat forecasts, movement-entry context, boss-room combat context, current-situation look text, and wait-triggered local pressure without location-id checks in the UI or reducer. `route_note` and `threat_forecast_open` may use `{barricade_heal}` and `{pressure_damage}` placeholders. Situation lines may use `{barricade_heal}`. `passive_pressure_enemy_id` references a normal enemy template; if that enemy is alive at the current location, waiting can either apply exposed pressure damage or use the blocked line when the location is barricaded. For look context, pressure situations resolve in enemy-cleared, barricaded, then high-noise order; boss situations resolve in wounded-and-secured, wounded, secured, partially secured, then high-noise order. Hook text is optional, but blank hook values are rejected.
+
+Current location tags with reducer meaning:
+
+- `noise_pressure`: marks a location where high global noise can increase exposed-route pressure while the location is not barricaded
 
 Current post-`v0.1` branch note:
 
@@ -215,8 +266,20 @@ Suggested item fields:
 - optional durability or single-use metadata
 - optional media references
 - optional use-effect metadata
+- optional inspect and pickup flavor hooks
 
 Items that matter mechanically should expose the relevant data directly rather than forcing the narrator to infer it from prose.
+
+Current optional item flavor hooks:
+
+- `inspect_lines`
+- `objective_required_line`
+- `objective_not_required_line`
+- `pickup_line`
+- `utility_success_line`
+- `utility_empty_line`
+
+These hooks let datapacks add item-specific inspect, pickup, and utility-effect text without item-id checks in the reducer. `objective_required_line` is used when the active objective requires that item; `objective_not_required_line` is used otherwise. `utility_success_line` is used when a utility effect such as `reveal_connections` changes state; `utility_empty_line` is used when that effect has nothing new to reveal. Hook text is optional, but blank hook values are rejected.
 
 ## Enemy Templates
 
@@ -240,6 +303,15 @@ Suggested enemy fields:
 
 `can_hear` and `can_see` are mechanical sense flags. They default to `true` for older datapacks. Set them explicitly when a creature should ignore noise attraction, visual acquisition, or future narrator/AI hooks tied to those senses.
 
+Current optional enemy flavor hooks:
+
+- `retaliation_line`
+- `defeat_line`
+- `inspect_alive_line`
+- `inspect_defeated_line`
+
+These hooks let a datapack author scenario-specific combat and inspect flavor without adding enemy-id checks to the reducer. They are optional, but if present they must not be blank.
+
 `v0.1` enemy templates should remain small and combat-focused.
 
 ## Boss Templates
@@ -257,11 +329,28 @@ Suggested boss fields:
 - `can_see`
 - HP
 - attack strength
+- optional wounded-phase threshold and damage bonus
+- optional wounded-phase combat, retaliation, and inspect lines
 - special scenario role
 - optional lock or objective linkage
 - optional media references
 
 Boss sense flags default to `true`, matching enemy templates. Current demo behavior mostly uses these flags for enemy-backed runtime movement, but boss templates expose the same truth now for future mobile bosses, narrator context, and modder consistency.
+
+Current optional boss phase fields:
+
+- `defeat_line`
+- `retaliation_line`
+- `finale_security_retaliation_line`
+- `wounded_phase_hp_threshold`
+- `wounded_phase_damage_bonus`
+- `wounded_phase_combat_line`
+- `wounded_phase_retaliation_line`
+- `wounded_phase_inspect_active`
+- `wounded_phase_inspect_pending`
+- `wounded_phase_inspect_defeated`
+
+If `wounded_phase_hp_threshold` is present, the boss enters its wounded phase when remaining HP is greater than `0` and less than or equal to that threshold. The threshold must be greater than `0` and lower than the boss's starting HP. Damage bonus values must not be negative, and optional phase lines must not be blank. `defeat_line` may use `{boss_name}`; `retaliation_line` may use `{boss_name}` and `{damage}`; `finale_security_retaliation_line` may use `{boss_name}`, `{damage}`, and `{reduction}`.
 
 For `v0.1`, the important point is not complexity. It is that boss state and objective relevance are explicit and deterministic.
 

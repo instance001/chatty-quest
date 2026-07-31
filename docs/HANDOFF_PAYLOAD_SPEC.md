@@ -328,6 +328,8 @@ Should include:
 Should include:
 
 - HP and max HP
+- accepted turn index
+- current noise level when the scenario exposes noise pressure
 - equipped item summary
 - future high-signal stats only
 

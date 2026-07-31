@@ -92,8 +92,10 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         format!("Scenario loaded: {}.", bundle.pack.display_name),
         format!("You begin at {}.", location_name),
         format!("Objective locked in: {}.", active_objective.name),
-        "Try commands like: look, take medkit, unlock back_garden, barricade front_verandah, go garage, attack, wait.".to_owned(),
     ];
+    if let Some(starter_hint_line) = bundle.rules.starter_hint_line.as_deref() {
+        log_lines.push(starter_hint_line.to_owned());
+    }
 
     if let Some(dm_style) = &bundle.dm_style {
         log_lines.push(format!("DM capsule: {}.", dm_style));
@@ -122,6 +124,7 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         locked_locations,
         broken_locked_locations,
         barricaded_locations,
+        turn_index: 0,
         noise_level: 0,
         noise_spawn_count: 0,
         spawned_enemy_targets: HashMap::new(),
@@ -212,6 +215,7 @@ mod tests {
         assert!(state.locked_locations.contains("back_garden"));
         assert!(state.broken_locked_locations.is_empty());
         assert!(state.barricaded_locations.is_empty());
+        assert_eq!(state.turn_index, 0);
         assert_eq!(state.noise_level, 0);
         assert_eq!(state.noise_spawn_count, 0);
         assert!(state.spawned_enemy_targets.is_empty());

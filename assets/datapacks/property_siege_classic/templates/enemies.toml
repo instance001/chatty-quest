@@ -8,6 +8,10 @@ can_hear = true
 can_see = true
 hp = 4
 damage = 2
+retaliation_line = "It keeps leaning its full dead weight into the threshold like the house personally offended it."
+defeat_line = "The front step stops feeling argued with for the first time all night."
+inspect_alive_line = "Route read: as long as it stands, the front threshold remains the loud direct-pressure lane."
+inspect_defeated_line = "Route read: the front threshold is mechanically calmer now that the shambler is down."
 
 [enemies.media]
 image = "media/images/enemies/front_gate_shambler.png"
@@ -24,6 +28,10 @@ can_hear = true
 can_see = true
 hp = 3
 damage = 1
+retaliation_line = "It comes in low and hateful, exactly where your attention keeps failing first."
+defeat_line = "The weeds go back to being weeds, which is somehow a relief."
+inspect_alive_line = "Route read: this is the flank tax; leave it alive and the back edge stays mean."
+inspect_defeated_line = "Route read: with the crawler gone, the back route is no longer being actively contested."
 
 [enemies.media]
 image = "media/images/enemies/crawler_in_weeds.png"

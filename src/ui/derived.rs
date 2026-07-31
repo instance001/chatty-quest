@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::data::datapacks::DatapackBundle;
+use crate::data::datapacks::{DatapackBundle, LocationTemplate};
 use crate::diagnostics::DiagnosticReport;
 use crate::game::derived::{
-    ObjectiveConditionRowStyle, attractor_summary_rows, objective_condition_rows, run_phase_label,
-    security_summary_rows, utility_relevance_rows,
+    ObjectiveConditionRowStyle, attractor_summary_rows, finale_security_secured,
+    objective_condition_rows, run_phase_label, security_summary_rows, utility_relevance_rows,
 };
 use crate::game::{RunState, location_description_for_state};
 use crate::media::{MediaPanelState, resolve_location_tile_image, resolve_primary_image};
@@ -463,7 +463,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
                     broken: run.broken_locked_locations.contains(&destination.id),
                     barricaded: run.barricaded_locations.contains(&destination.id),
                     route_note: route_note_for_location(destination),
-                    threat_forecast: threat_forecast_for_location(run, destination),
+                    threat_forecast: threat_forecast_for_location(run, bundle, destination),
                 })
         })
         .collect();
@@ -528,7 +528,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
     if let Some(route_note) = route_note_for_location(current_location) {
         current_location_status_lines.push(format!("Route role: {}", route_note));
     }
-    if let Some(threat_forecast) = threat_forecast_for_location(run, current_location) {
+    if let Some(threat_forecast) = threat_forecast_for_location(run, bundle, current_location) {
         current_location_status_lines.push(format!("Threat forecast: {}", threat_forecast));
     }
     current_location_status_lines.extend(attractor_summary_rows(run, Some(bundle)));
@@ -1622,85 +1622,98 @@ fn tile_visibility_under_fog(
 }
 
 fn route_note_for_location(location: &crate::data::datapacks::LocationTemplate) -> Option<String> {
-    match location.id.as_str() {
-        "front_verandah" => Some("threshold defense against front-gate pressure".to_owned()),
-        "back_garden" => {
-            if location.barricade_heal > 0 {
-                Some(format!(
-                    "risky flank that can return {} HP when secured",
-                    location.barricade_heal
-                ))
-            } else {
-                Some("risky flank route".to_owned())
-            }
-        }
-        "garage" => Some("boss route and objective destination".to_owned()),
-        _ => None,
-    }
+    location
+        .route_note
+        .as_deref()
+        .map(|line| format_location_hook_line(line, location, 0))
 }
 
 fn threat_forecast_for_location(
     run: &RunState,
+    bundle: &DatapackBundle,
     location: &crate::data::datapacks::LocationTemplate,
 ) -> Option<String> {
-    match location.id.as_str() {
-        "front_verandah" => {
-            if !run.enemies_alive.contains("shambler_front_gate") {
-                Some("front gate pressure is cleared".to_owned())
-            } else if run.barricaded_locations.contains(&location.id) {
-                Some("safe from passive threshold chip while the barricade holds".to_owned())
-            } else {
-                Some(format!(
-                    "waiting here will cost {} HP until the front route is secured",
-                    exposed_route_pressure_preview(run)
-                ))
-            }
-        }
-        "back_garden" => {
-            if run.locked_locations.contains(&location.id) {
-                Some("currently gated, but still the only route to the barricade kit".to_owned())
-            } else if !run.enemies_alive.contains("crawler_in_weeds") {
-                Some("flank threat is cleared".to_owned())
-            } else if run.barricaded_locations.contains(&location.id) {
-                Some("safe from passive flank chip and usable as a recovery pocket".to_owned())
-            } else {
-                Some(format!(
-                    "waiting here will cost {} HP until the back edge is secured",
-                    exposed_route_pressure_preview(run)
-                ))
-            }
-        }
-        "garage" => {
-            let boss_alive = run
-                .location_bosses
-                .get(&location.id)
-                .into_iter()
-                .flatten()
-                .any(|boss_id| run.bosses_alive.contains(boss_id));
-            if run.locked_locations.contains(&location.id) {
-                Some("locked until you are holding the house keys".to_owned())
-            } else if boss_alive && property_siege_lanes_secured(run) {
-                Some(
-                    "finale is live, but both siege lanes are secured; brute retaliation is reduced"
-                        .to_owned(),
-                )
-            } else if boss_alive {
-                Some("objective room is live; expect boss retaliation, not passive chip".to_owned())
-            } else {
-                Some("objective room is open and mostly stabilized".to_owned())
-            }
-        }
-        _ => None,
+    let pressure_damage = exposed_route_pressure_preview(run);
+    if run.locked_locations.contains(&location.id) {
+        return format_location_hook_option(
+            location.threat_forecast_locked.as_deref(),
+            location,
+            pressure_damage,
+        );
     }
+
+    let boss_alive = run
+        .location_bosses
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .any(|boss_id| run.bosses_alive.contains(boss_id));
+    if boss_alive && finale_security_secured(run, bundle) {
+        return format_location_hook_option(
+            location.threat_forecast_boss_secured.as_deref(),
+            location,
+            pressure_damage,
+        );
+    }
+    if boss_alive {
+        return format_location_hook_option(
+            location.threat_forecast_boss_live.as_deref(),
+            location,
+            pressure_damage,
+        );
+    }
+
+    let enemy_alive = run
+        .location_enemies
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .any(|enemy_id| run.enemies_alive.contains(enemy_id));
+    if !enemy_alive {
+        return format_location_hook_option(
+            location.threat_forecast_cleared.as_deref(),
+            location,
+            pressure_damage,
+        );
+    }
+
+    if run.barricaded_locations.contains(&location.id) {
+        return format_location_hook_option(
+            location.threat_forecast_barricaded.as_deref(),
+            location,
+            pressure_damage,
+        );
+    }
+
+    format_location_hook_option(
+        location.threat_forecast_open.as_deref(),
+        location,
+        pressure_damage,
+    )
+}
+
+fn format_location_hook_option(
+    line: Option<&str>,
+    location: &crate::data::datapacks::LocationTemplate,
+    pressure_damage: i32,
+) -> Option<String> {
+    line.map(|line| format_location_hook_line(line, location, pressure_damage))
+}
+
+fn format_location_hook_line(
+    line: &str,
+    location: &crate::data::datapacks::LocationTemplate,
+    pressure_damage: i32,
+) -> String {
+    line.replace(
+        "{barricade_heal}",
+        &location.barricade_heal.max(0).to_string(),
+    )
+    .replace("{pressure_damage}", &pressure_damage.to_string())
 }
 
 fn exposed_route_pressure_preview(run: &RunState) -> i32 {
     if run.noise_level >= 2 { 2 } else { 1 }
-}
-
-fn property_siege_lanes_secured(run: &RunState) -> bool {
-    run.barricaded_locations.contains("front_verandah")
-        && run.barricaded_locations.contains("back_garden")
 }
 
 fn noise_label(level: i32) -> &'static str {
@@ -1798,15 +1811,12 @@ fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<Ac
             }
         }
 
-        if location.id != "garage"
-            && run.active_objective.required_location_id.as_deref() == Some("garage")
-            && !run.locked_locations.contains("garage")
-            && location
-                .connections
-                .iter()
-                .any(|connection| connection == "garage")
-        {
-            push_action(&mut actions, "Go Garage", "go garage");
+        if let Some(target) = connected_objective_location(run, bundle, location) {
+            push_action(
+                &mut actions,
+                &format!("Go {}", target.name),
+                &format!("go {}", target.id),
+            );
         }
     }
 
@@ -1882,17 +1892,33 @@ fn recommended_command(run: &RunState, bundle: &DatapackBundle) -> String {
         return format!("unlock {}", connection);
     }
 
-    if run.active_objective.required_location_id.as_deref() == Some("garage")
-        && !run.locked_locations.contains("garage")
-        && location
-            .connections
-            .iter()
-            .any(|connection| connection == "garage")
-    {
-        return "go garage".to_owned();
+    if let Some(target) = connected_objective_location(run, bundle, location) {
+        return format!("go {}", target.id);
     }
 
     "look".to_owned()
+}
+
+fn connected_objective_location<'a>(
+    run: &RunState,
+    bundle: &'a DatapackBundle,
+    location: &LocationTemplate,
+) -> Option<&'a LocationTemplate> {
+    let required_location_id = run.active_objective.required_location_id.as_deref()?;
+    if location.id == required_location_id || run.locked_locations.contains(required_location_id) {
+        return None;
+    }
+
+    location.connections.iter().find_map(|connection_id| {
+        if connection_id == required_location_id {
+            bundle
+                .locations
+                .iter()
+                .find(|candidate| candidate.id == required_location_id)
+        } else {
+            None
+        }
+    })
 }
 
 fn push_action(actions: &mut Vec<ActionButtonModel>, label: &str, command: &str) {

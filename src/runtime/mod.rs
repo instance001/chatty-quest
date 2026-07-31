@@ -44,7 +44,7 @@ pub fn load_game() -> Result<SavePayload, String> {
     let save_path = app_paths::current_save_path();
     let json = fs::read_to_string(&save_path)
         .map_err(|err| format!("Could not read save file: {}.", err))?;
-    serde_json::from_str(&json).map_err(|err| format!("Could not parse save file: {}.", err))
+    parse_save_payload(&json)
 }
 
 pub fn current_save_path() -> String {
@@ -63,6 +63,30 @@ fn default_fog_mode() -> String {
     "Known".to_owned()
 }
 
+fn parse_save_payload(json: &str) -> Result<SavePayload, String> {
+    let payload: SavePayload =
+        serde_json::from_str(json).map_err(|err| format!("Could not parse save file: {}.", err))?;
+    migrate_save_payload(payload)
+}
+
+fn migrate_save_payload(payload: SavePayload) -> Result<SavePayload, String> {
+    match payload.save_version {
+        SAVE_VERSION => Ok(payload),
+        0 => Err(format!(
+            "Unsupported save file version 0. Current save version is {}.",
+            SAVE_VERSION
+        )),
+        version if version > SAVE_VERSION => Err(format!(
+            "Save file version {} is newer than this app supports. Current save version is {}.",
+            version, SAVE_VERSION
+        )),
+        version => Err(format!(
+            "Unsupported save file version {}. Current save version is {}.",
+            version, SAVE_VERSION
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -71,7 +95,10 @@ mod tests {
     use crate::data::datapacks::load_datapack_bundle_by_folder;
     use crate::game::generate_new_run;
 
-    use super::{SavePayload, current_save_path, current_save_version, load_game, save_game};
+    use super::{
+        SavePayload, current_save_path, current_save_version, load_game, parse_save_payload,
+        save_game,
+    };
 
     struct SaveFileGuard {
         original_contents: Option<String>,
@@ -114,6 +141,7 @@ mod tests {
         run.locked_locations.remove("garage");
         run.broken_locked_locations.insert("back_garden".to_owned());
         run.barricaded_locations.insert("front_verandah".to_owned());
+        run.turn_index = 42;
         run.noise_level = 2;
         run.noise_spawn_count = 1;
         run.spawned_enemy_targets.insert(
@@ -198,6 +226,7 @@ mod tests {
                 .barricaded_locations
                 .contains("front_verandah")
         );
+        assert_eq!(restored.run_state.turn_index, 42);
         assert_eq!(restored.run_state.noise_level, 2);
         assert_eq!(restored.run_state.noise_spawn_count, 1);
         assert_eq!(
@@ -248,5 +277,65 @@ mod tests {
         );
         assert_eq!(restored.run_state.inventory.len(), run.inventory.len());
         assert_eq!(restored.run_state.equipped_item_id, run.equipped_item_id);
+    }
+
+    #[test]
+    fn save_payload_parser_rejects_unsupported_versions() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let run = generate_new_run(&bundle).state;
+        let payload = SavePayload {
+            save_version: current_save_version() + 1,
+            selected_datapack: "Property Siege Classic".to_owned(),
+            difficulty: 0.35,
+            chaos_mode: 0.10,
+            fog_mode: "Known".to_owned(),
+            dm_capsule: "Grim Survival".to_owned(),
+            cpu_helper_model: "cpu-test".to_owned(),
+            gpu_narrator_model: "gpu-test".to_owned(),
+            active_tab: "Game".to_owned(),
+            log_lines: vec!["System: test save".to_owned()],
+            diagnostic_events: Vec::new(),
+            run_state: run,
+        };
+
+        let json = serde_json::to_string(&payload).expect("expected test payload to serialize");
+        let error = parse_save_payload(&json).expect_err("expected future save version to fail");
+
+        assert!(error.contains("newer than this app supports"));
+        assert!(error.contains("Current save version is 1"));
+    }
+
+    #[test]
+    fn save_payload_parser_accepts_missing_version_as_v1() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let run = generate_new_run(&bundle).state;
+        let payload = SavePayload {
+            save_version: current_save_version(),
+            selected_datapack: "Property Siege Classic".to_owned(),
+            difficulty: 0.35,
+            chaos_mode: 0.10,
+            fog_mode: "Known".to_owned(),
+            dm_capsule: "Grim Survival".to_owned(),
+            cpu_helper_model: "cpu-test".to_owned(),
+            gpu_narrator_model: "gpu-test".to_owned(),
+            active_tab: "Game".to_owned(),
+            log_lines: vec!["System: test save".to_owned()],
+            diagnostic_events: Vec::new(),
+            run_state: run,
+        };
+        let mut value =
+            serde_json::to_value(&payload).expect("expected test payload to become JSON");
+        value
+            .as_object_mut()
+            .expect("expected save payload object")
+            .remove("save_version");
+        let json = serde_json::to_string(&value).expect("expected test payload to serialize");
+
+        let restored =
+            parse_save_payload(&json).expect("expected missing version to default to v1");
+
+        assert_eq!(restored.save_version, current_save_version());
     }
 }

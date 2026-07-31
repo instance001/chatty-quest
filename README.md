@@ -24,7 +24,7 @@ Current release status:
 - the desktop `egui/eframe` shell is playable end-to-end
 - datapack discovery, deterministic run generation, reducer actions, `MockNarrator`, media focus, diagnostics, and JSON save/load are all wired and working
 - the current branch also includes `v0.2`-lane siege-depth work for barricades, noise pressure, route forecasting, guided command surfaces, and authored garage-finale payoffs
-- `cargo test` currently passes with `75` automated tests
+- `cargo test` currently passes with `105` automated tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
 - the original `v0.1` live manual sweep passed on `2026-06-11`, and the current branch has refreshed sweep/audit notes dated `2026-07-28`
 

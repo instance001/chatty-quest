@@ -6,6 +6,8 @@ narrator_brief = "Treat the torch as useful but faintly insulting: the kind of t
 tags = ["utility", "starter_item", "weak_weapon"]
 damage = 1
 utility_effect = "reveal_connections"
+utility_success_line = "You sweep the torch across the exits and get a better read on the nearby routes."
+utility_empty_line = "The torch does not reveal anything new from here."
 
 [items.media]
 image = "media/images/items/torch.png"
@@ -32,6 +34,11 @@ description = "Half crushed, but still very welcome. Using it restores a small c
 narrator_brief = "Treat the medkit like a tiny miracle made of cheap plastic, stale gauze, and lowered standards."
 tags = ["consumable", "healing", "single_use"]
 damage = 0
+inspect_lines = [
+  "Use case: restores 4 HP, then it is gone.",
+  "This is the run's cleanest recovery spike, so wasting it usually hurts twice.",
+]
+pickup_line = "A tiny, crinkling argument against dying stupidly."
 
 [items.media]
 image = "media/images/items/medkit.png"
@@ -45,6 +52,10 @@ description = "Still on the same keyring they always lived on. Familiar, groundi
 narrator_brief = "Give the keys a weird emotional weight: ordinary, small, and much more important than they ought to be, even if v0.1 gives them no direct mechanical job."
 tags = ["utility", "keepsake"]
 damage = 0
+inspect_lines = ["Use case: opens the garage and the chained back gate."]
+objective_required_line = "Objective pressure: you do not just need these once, you need to still be holding them at the end."
+objective_not_required_line = "Ordinary keys, extremely non-ordinary night."
+pickup_line = "They feel much heavier now that the whole route depends on them."
 
 [items.media]
 image = "media/images/items/house_keys.png"
@@ -59,3 +70,8 @@ narrator_brief = "Treat the kit like a desperate little promise that the house m
 tags = ["utility", "barricade_tool"]
 damage = 0
 utility_effect = "barricade"
+inspect_lines = [
+  "Use case: secures a barricadable route when used from that location.",
+  "In this scenario, it turns exposed space into breathing room instead of raw safety.",
+]
+pickup_line = "Not elegant materials, but they are the right kind of ugly."

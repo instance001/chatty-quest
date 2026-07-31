@@ -87,6 +87,7 @@ Avoid in the first pass:
 
 Recommended minimum truth:
 
+- `turn_index: u64`
 - `noise_level: i32`
 - `noise_spawn_count: u32`
 - `spawned_enemy_targets: HashMap<String, String>`
@@ -103,13 +104,17 @@ Enemy and boss templates expose sense flags:
 
 Both default to `true` for backward compatibility with older datapacks.
 
-Scenario rules expose tuning percentages:
+Scenario rules expose tuning and finale-security hooks:
 
 - `sight_acquire_chance_percent`
 - `sight_chase_delay_chance_percent`
 - `spawned_hazard_break_chance_percent`
+- `finale_target_location_id`
+- `finale_boss_id`
+- `finale_secured_location_ids`
+- `finale_secured_retaliation_reduction`
 
-Current `Property Siege Classic` values are `70`, `35`, and `35`.
+Current `Property Siege Classic` percentage values are `70`, `35`, and `35`; its finale-security hook targets `garage`, `brute_in_garage`, and the secured locations `front_verandah` plus `back_garden`.
 
 Suggested first-pass range:
 
@@ -241,7 +246,7 @@ Current first reading:
 - remember the map location where noise crossed into `Swarming` as the spawned instance target
 - remember the spawned instance's first placed location as its origin
 
-The selection is deterministic from run state and spawn count. It should feel like a random pool pull to the player, while staying replayable for tests, saves, and future handoff traces.
+The selection is deterministic from run state, accepted turn index, and spawn count. It should feel like a random pool pull to the player, while staying replayable for tests, saves, and future handoff traces.
 
 ### 5. Spawned-Enemy Movement
 
@@ -321,8 +326,9 @@ Recommended first-pass shape:
 - keep `noise` mostly engine-owned as a small global state family
 - allow room and scenario content to influence where noise consequences matter most
 
-Later extensions may add data fields like:
+Location tags and later extensions may add data fields like:
 
+- `noise_pressure`
 - `noise_sensitive = true`
 - `noise_decay_bonus = 1`
 - `noise_damage_bonus = 1`
@@ -393,6 +399,7 @@ Minimum automated coverage:
 - rejected or blocked actions do not lower noise
 - passive pressure scales correctly at higher noise where authored
 - save/load preserves `noise_level`
+- deterministic rolls continue to vary after `rolling_summary` reaches its cap
 - diagnostics or derived models show the current noise truth
 
 ## Explicit Non-Goals

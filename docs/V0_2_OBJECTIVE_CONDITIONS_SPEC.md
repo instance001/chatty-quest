@@ -145,7 +145,7 @@ Current garage-finale reading:
 
 - the objective destination is not just a box to tick
 - the `garage` now acts as a readable finale room with a live boss-space identity
-- once `brute_in_garage` is pushed into its wounded end state, the room and combat text both surface that the finish has become more dangerous
+- once the objective boss is pushed into its template-authored wounded end state, the room and combat text both surface that the finish has become more dangerous
 - if both exposed siege lanes are barricaded before the fight, the garage finale also surfaces a small secured-property payoff through reduced brute retaliation
 
 Those wrinkles do not change objective truth semantics.

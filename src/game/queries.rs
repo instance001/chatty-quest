@@ -2,6 +2,7 @@ use crate::data::datapacks::{
     BossTemplate, DatapackBundle, EnemyTemplate, ItemTemplate, LocationTemplate,
 };
 
+use super::derived::{boss_wounded_phase_active, finale_security_secured};
 use super::state::RunState;
 
 pub fn describe_current_location(state: &RunState, bundle: &DatapackBundle) -> Vec<String> {
@@ -10,7 +11,7 @@ pub fn describe_current_location(state: &RunState, bundle: &DatapackBundle) -> V
     };
 
     let mut lines = describe_location(state, bundle, location);
-    lines.extend(current_location_context_lines(state, location));
+    lines.extend(current_location_context_lines(state, bundle, location));
     lines
 }
 
@@ -245,7 +246,11 @@ pub fn matches_name(query: &str, id: &str, name: &str) -> bool {
     normalized_query == normalize_name(id) || normalized_query == normalize_name(name)
 }
 
-fn current_location_context_lines(state: &RunState, location: &LocationTemplate) -> Vec<String> {
+fn current_location_context_lines(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    location: &LocationTemplate,
+) -> Vec<String> {
     let mut lines = Vec::new();
 
     if state.active_objective.required_location_id.as_deref() == Some(location.id.as_str())
@@ -257,88 +262,90 @@ fn current_location_context_lines(state: &RunState, location: &LocationTemplate)
         );
     }
 
-    match location.id.as_str() {
-        "front_verandah" => {
-            if !state.enemies_alive.contains("shambler_front_gate") {
-                lines.push(
-                    "Situation: the front threshold is still a mess, but at least it belongs to you again."
-                        .to_owned(),
-                );
-            } else if state.barricaded_locations.contains(&location.id) {
-                lines.push(
-                    "Situation: the threshold is still ugly, but the barricade makes it feel survivable."
-                        .to_owned(),
-                );
-            } else if state.noise_level >= 2 {
-                lines.push(
-                    "Situation: every loose sound on the property seems to funnel back toward the front step."
-                        .to_owned(),
-                );
-            }
-        }
-        "back_garden" => {
-            if !state.enemies_alive.contains("crawler_in_weeds") {
-                lines.push(
-                    "Situation: the yard is still mean-looking, but the worst thing in the weeds is finally gone."
-                        .to_owned(),
-                );
-            } else if state.barricaded_locations.contains(&location.id)
-                && location.barricade_heal > 0
-            {
-                lines.push(format!(
-                    "Situation: with the back edge secured, this becomes a rare place to recover {} HP and regroup.",
-                    location.barricade_heal
-                ));
-            } else if state.noise_level >= 2 {
-                lines.push(
-                    "Situation: the yard is too open for this much noise; anything low to the ground gets closer for free."
-                        .to_owned(),
-                );
-            }
-        }
-        "garage" => {
-            let boss_is_here = state
-                .location_bosses
-                .get(&location.id)
-                .into_iter()
-                .flatten()
-                .any(|boss_id| state.bosses_alive.contains(boss_id));
-            let brute_wounded = state
-                .boss_hp
-                .get("brute_in_garage")
-                .is_some_and(|remaining_hp| *remaining_hp > 0 && *remaining_hp <= 4);
-
-            if brute_wounded && property_siege_lanes_secured(state) {
-                lines.push(
-                    "Situation: the brute is wounded, but both exposed approaches are barricaded. The garage is still ugly, just no longer backed by the whole property."
-                        .to_owned(),
-                );
-            } else if brute_wounded {
-                lines.push(
-                    "Situation: the brute is hurt enough to get sloppy and strong at the same time. The garage feels smaller by the second."
-                        .to_owned(),
-                );
-            } else if boss_is_here && property_siege_lanes_secured(state) {
-                lines.push(
-                    "Situation: both exposed approaches are barricaded before the finale. The brute still owns the room, but the siege pressure has lost a little bite."
-                        .to_owned(),
-                );
-            } else if boss_is_here && state.barricaded_locations.contains("front_verandah") {
-                lines.push(
-                    "Situation: the front barricade is buying you time while you deal with the real problem in here."
-                        .to_owned(),
-                );
-            } else if boss_is_here && state.noise_level >= 2 {
-                lines.push(
-                    "Situation: the noise outside makes the garage feel less like shelter and more like a deadline."
-                        .to_owned(),
-                );
-            }
-        }
-        _ => {}
+    if let Some(line) = location_situation_line(state, bundle, location) {
+        lines.push(line);
     }
 
     lines
+}
+
+fn location_situation_line(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    location: &LocationTemplate,
+) -> Option<String> {
+    if let Some(line) = pressure_situation_line(state, location) {
+        return Some(line);
+    }
+
+    boss_situation_line(state, bundle, location)
+}
+
+fn pressure_situation_line(state: &RunState, location: &LocationTemplate) -> Option<String> {
+    let pressure_enemy_id = location.passive_pressure_enemy_id.as_deref()?;
+    let line = if !state.enemies_alive.contains(pressure_enemy_id) {
+        location.situation_enemy_cleared_line.as_deref()
+    } else if state.barricaded_locations.contains(&location.id) {
+        location.situation_barricaded_line.as_deref()
+    } else if state.noise_level >= 2 {
+        location.situation_high_noise_line.as_deref()
+    } else {
+        None
+    }?;
+    Some(render_location_situation_line(line, location))
+}
+
+fn boss_situation_line(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    location: &LocationTemplate,
+) -> Option<String> {
+    let live_boss_ids = state
+        .location_bosses
+        .get(&location.id)
+        .into_iter()
+        .flatten()
+        .filter(|boss_id| state.bosses_alive.contains(*boss_id))
+        .collect::<Vec<_>>();
+    if live_boss_ids.is_empty() {
+        return None;
+    }
+
+    let boss_wounded = live_boss_ids.iter().any(|boss_id| {
+        let Some(boss) = find_boss(bundle, boss_id) else {
+            return false;
+        };
+        let remaining_hp = state.boss_hp.get(*boss_id).copied().unwrap_or(0);
+        boss_wounded_phase_active(boss, remaining_hp)
+    });
+
+    let line = if boss_wounded && finale_security_secured(state, bundle) {
+        location.situation_boss_wounded_secured_line.as_deref()
+    } else if boss_wounded {
+        location.situation_boss_wounded_line.as_deref()
+    } else if finale_security_secured(state, bundle) {
+        location.situation_boss_secured_line.as_deref()
+    } else if finale_security_partially_secured(state, bundle) {
+        location.situation_boss_partially_secured_line.as_deref()
+    } else if state.noise_level >= 2 {
+        location.situation_high_noise_line.as_deref()
+    } else {
+        None
+    }?;
+
+    Some(render_location_situation_line(line, location))
+}
+
+fn finale_security_partially_secured(state: &RunState, bundle: &DatapackBundle) -> bool {
+    bundle
+        .rules
+        .finale_secured_location_ids
+        .iter()
+        .any(|location_id| state.barricaded_locations.contains(location_id))
+}
+
+fn render_location_situation_line(line: &str, location: &LocationTemplate) -> String {
+    line.replace("{barricade_heal}", &location.barricade_heal.to_string())
 }
 
 fn normalize_name(value: &str) -> String {
@@ -348,9 +355,4 @@ fn normalize_name(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn property_siege_lanes_secured(state: &RunState) -> bool {
-    state.barricaded_locations.contains("front_verandah")
-        && state.barricaded_locations.contains("back_garden")
 }
