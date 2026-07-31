@@ -6,8 +6,8 @@ use crate::data::datapacks::{
 };
 use crate::game::actions::ItemUseEffect;
 use crate::game::derived::{
-    ObjectiveConditionRowStyle, objective_condition_rows, run_phase_label, security_summary_rows,
-    utility_relevance_rows,
+    ObjectiveConditionRowStyle, attractor_summary_rows, objective_condition_rows, run_phase_label,
+    security_summary_rows, utility_relevance_rows,
 };
 use crate::game::{GameEvent, RunState};
 
@@ -81,11 +81,13 @@ pub struct RunHealthReport {
     pub objective_condition_rows: Vec<String>,
     pub utility_relevance_rows: Vec<String>,
     pub security_summary_rows: Vec<String>,
+    pub attractor_summary_rows: Vec<String>,
     pub inventory_items: usize,
     pub known_locations: usize,
     pub live_enemies: usize,
     pub live_bosses: usize,
     pub locked_locations: Vec<String>,
+    pub broken_locked_locations: Vec<String>,
     pub barricaded_locations: Vec<String>,
 }
 
@@ -263,6 +265,7 @@ pub fn build_diagnostic_report(
         ),
         utility_relevance_rows: utility_relevance_rows(run, current_bundle),
         security_summary_rows: security_summary_rows(run, current_bundle),
+        attractor_summary_rows: attractor_summary_rows(run, current_bundle),
         inventory_items: run.inventory.len(),
         known_locations: run.known_locations.len(),
         live_enemies: run.enemies_alive.len(),
@@ -271,6 +274,15 @@ pub fn build_diagnostic_report(
             let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
             locked.sort();
             locked
+        },
+        broken_locked_locations: {
+            let mut broken = run
+                .broken_locked_locations
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            broken.sort();
+            broken
         },
         barricaded_locations: {
             let mut barricaded = run.barricaded_locations.iter().cloned().collect::<Vec<_>>();
@@ -595,6 +607,75 @@ fn format_game_event(event: &GameEvent) -> String {
             "DamageTaken(amount={}, remaining_hp={})",
             amount, remaining_hp
         ),
+        GameEvent::NoiseSpawnedEnemy {
+            enemy_id,
+            template_id,
+            location_id,
+        } => format!(
+            "NoiseSpawnedEnemy(enemy_id={}, template_id={}, location_id={})",
+            enemy_id, template_id, location_id
+        ),
+        GameEvent::NoiseAttractorShifted {
+            location_id,
+            enemy_ids,
+        } => format!(
+            "NoiseAttractorShifted(location_id={}, enemy_ids={})",
+            location_id,
+            enemy_ids.join("|")
+        ),
+        GameEvent::SightAttractorAcquired {
+            enemy_id,
+            subject_id,
+            location_id,
+        } => format!(
+            "SightAttractorAcquired(enemy_id={}, subject_id={}, location_id={})",
+            enemy_id, subject_id, location_id
+        ),
+        GameEvent::SightAttractorMissed {
+            enemy_id,
+            subject_id,
+            location_id,
+            detect_chance_percent,
+            roll_percent,
+        } => format!(
+            "SightAttractorMissed(enemy_id={}, subject_id={}, location_id={}, detect_chance_percent={}, roll_percent={})",
+            enemy_id, subject_id, location_id, detect_chance_percent, roll_percent
+        ),
+        GameEvent::SightAttractorLost {
+            enemy_id,
+            subject_id,
+        } => format!(
+            "SightAttractorLost(enemy_id={}, subject_id={})",
+            enemy_id, subject_id
+        ),
+        GameEvent::SpawnedEnemyMoved {
+            enemy_id,
+            from_location_id,
+            to_location_id,
+            target_location_id,
+        } => format!(
+            "SpawnedEnemyMoved(enemy_id={}, from={}, to={}, target={})",
+            enemy_id, from_location_id, to_location_id, target_location_id
+        ),
+        GameEvent::SpawnedEnemyWaited {
+            enemy_id,
+            location_id,
+            reason,
+        } => format!(
+            "SpawnedEnemyWaited(enemy_id={}, location_id={}, reason={})",
+            enemy_id, location_id, reason
+        ),
+        GameEvent::SpawnedEnemyAttackedHazard {
+            enemy_id,
+            hazard_kind,
+            location_id,
+            break_chance_percent,
+            roll_percent,
+            broken,
+        } => format!(
+            "SpawnedEnemyAttackedHazard(enemy_id={}, hazard_kind={:?}, location_id={}, break_chance_percent={}, roll_percent={}, broken={})",
+            enemy_id, hazard_kind, location_id, break_chance_percent, roll_percent, broken
+        ),
         GameEvent::AttackWhiff => "AttackWhiff".to_owned(),
         GameEvent::Waited { location_id } => format!("Waited(location_id={})", location_id),
         GameEvent::ObjectiveCompleted { objective_id } => {
@@ -684,6 +765,12 @@ mod tests {
                 row == "Open approaches: Front Verandah (front_verandah), Back Garden (back_garden)"
             })
         }));
+        assert!(
+            report
+                .run_health
+                .as_ref()
+                .is_some_and(|health| { health.attractor_summary_rows.is_empty() })
+        );
         assert_eq!(report.event_counters.moves, 1);
         assert_eq!(report.event_counters.items_taken, 1);
         assert!(
@@ -725,6 +812,40 @@ mod tests {
                 && warning
                     .message
                     .contains("referenced media asset(s) are missing")
+        }));
+    }
+
+    #[test]
+    fn diagnostic_report_surfaces_active_attractors() {
+        let datapacks = discover_datapacks();
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        run.enemies_alive.insert(enemy_id.clone());
+        run.enemy_hp.insert(enemy_id.clone(), 3);
+        run.spawned_enemy_sight_targets
+            .insert(enemy_id.clone(), "front_verandah".to_owned());
+        run.spawned_enemy_sight_subjects
+            .insert(enemy_id.clone(), "player".to_owned());
+
+        let report = build_diagnostic_report(
+            &datapacks,
+            Some(&bundle),
+            Some(&run),
+            false,
+            "save.json",
+            1,
+            Some(1),
+            crate::data::datapacks::datapack_schema_version(),
+            &[],
+        );
+
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health
+                .attractor_summary_rows
+                .iter()
+                .any(|row| row.contains("tracking by sight toward player"))
         }));
     }
 }

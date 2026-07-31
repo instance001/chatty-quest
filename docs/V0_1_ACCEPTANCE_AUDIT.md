@@ -23,9 +23,9 @@ Meaning:
 
 Automated evidence:
 
-- `cargo test` passes with `67` passing tests
+- `cargo test` passes with `75` passing tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
-- tests cover datapack discovery, command boundary parsing, multi-gate locked progression, barricade validation, two-room barricade pressure behavior, noise escalation, threat forecasting, utility-effect item behavior, utility/security truth surfacing, objective-condition feedback, objective-condition name surfacing, sidebar objective-progress surfacing, reducer behavior, post-win epilogue hooks, epilogue hook UI surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, UI-derived recommendation behavior, and save/load roundtrip
+- tests cover datapack discovery, command boundary parsing, multi-gate locked progression, broken-open gate state, barricade validation, two-room barricade pressure behavior, noise escalation, noise attractor retargeting, max-noise enemy spawning, spawned-enemy movement blockers and hazard attacks, threat forecasting, utility-effect item behavior, utility/security truth surfacing, objective-condition feedback, objective-condition name surfacing, sidebar objective-progress surfacing, reducer behavior, post-win epilogue hooks, epilogue hook UI surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, UI-derived recommendation behavior, and save/load roundtrip
 
 ## Acceptance Grid
 
@@ -143,7 +143,7 @@ Evidence:
 
 - noise state is modeled in [src/game/state.rs](../src/game/state.rs#L6)
 - reducer-owned noise updates and authored escalation behavior live in [src/game/reducer.rs](../src/game/reducer.rs#L875)
-- tests verify loud actions raise noise, barricaded waiting lowers it, exposed pressure scales up at higher noise, and save/load preserves the value
+- tests verify loud actions raise noise, successful non-noisy actions lower it over time, rejected actions do not lower it, exposed pressure scales up at higher noise, max-noise spawns a template-backed enemy instance into an outdoor yard square, and save/load preserves the value
 - `Game`, `Character`, and diagnostics surfaces now expose readable noise truth
 
 ### Combat

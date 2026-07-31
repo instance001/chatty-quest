@@ -24,8 +24,24 @@ pub struct RunState {
     pub location_enemies: HashMap<String, Vec<String>>,
     pub location_bosses: HashMap<String, Vec<String>>,
     pub locked_locations: HashSet<String>,
+    #[serde(default)]
+    pub broken_locked_locations: HashSet<String>,
     pub barricaded_locations: HashSet<String>,
     pub noise_level: i32,
+    #[serde(default)]
+    pub noise_spawn_count: u32,
+    #[serde(default)]
+    pub spawned_enemy_targets: HashMap<String, String>,
+    #[serde(default)]
+    pub spawned_enemy_origins: HashMap<String, String>,
+    #[serde(default)]
+    pub spawned_enemy_searching: HashSet<String>,
+    #[serde(default)]
+    pub spawned_enemy_sight_targets: HashMap<String, String>,
+    #[serde(default)]
+    pub spawned_enemy_sight_subjects: HashMap<String, String>,
+    #[serde(default)]
+    pub spawned_enemy_sight_delays: HashMap<String, u8>,
     pub boundary_response: Option<String>,
     pub rolling_summary: Vec<String>,
 }

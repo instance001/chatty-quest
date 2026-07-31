@@ -24,7 +24,7 @@ Estimated time: `5-10 minutes`
 
 Expected baseline:
 
-- `cargo test` passes with `67` automated tests
+- `cargo test` passes with `75` automated tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
 - `Property Siege Classic` is the selected datapack
 - setup screen is visible
@@ -243,7 +243,7 @@ Check:
 - location restores correctly
 - HP restores correctly
 - inventory restores correctly
-- locked/unlocked gate state restores correctly for the garage and any other changed gate
+- locked/unlocked/broken gate state restores correctly for the garage and any other changed gate
 - barricaded state restores correctly for the verandah and any barricaded flank
 - noise state restores correctly
 - objective state restores correctly

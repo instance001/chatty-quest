@@ -1,6 +1,7 @@
 use crate::data::datapacks::DatapackBundle;
 use crate::game::actions::EncounterKind;
 use crate::game::derived::run_phase_label;
+use crate::game::queries::find_enemy;
 
 use super::{ActionOutcome, GameAction, GameEvent, RunState};
 
@@ -198,6 +199,72 @@ fn event_fact(event: &GameEvent) -> String {
             "Player took {} damage; remaining HP: {}.",
             amount, remaining_hp
         ),
+        GameEvent::NoiseSpawnedEnemy {
+            enemy_id,
+            template_id,
+            location_id,
+        } => format!(
+            "Noise spawned enemy {} from template {} at {}.",
+            enemy_id, template_id, location_id
+        ),
+        GameEvent::NoiseAttractorShifted {
+            location_id,
+            enemy_ids,
+        } => format!(
+            "Noise attractor shifted to {} for spawned enemies: {}.",
+            location_id,
+            enemy_ids.join(", ")
+        ),
+        GameEvent::SightAttractorAcquired {
+            enemy_id,
+            subject_id,
+            location_id,
+        } => format!(
+            "Spawned enemy {} sighted {} at {}.",
+            enemy_id, subject_id, location_id
+        ),
+        GameEvent::SightAttractorMissed {
+            enemy_id,
+            subject_id,
+            location_id,
+            detect_chance_percent,
+            roll_percent,
+        } => format!(
+            "Spawned enemy {} had a sightline to {} at {} but missed the check: {}% chance, roll {}.",
+            enemy_id, subject_id, location_id, detect_chance_percent, roll_percent
+        ),
+        GameEvent::SightAttractorLost {
+            enemy_id,
+            subject_id,
+        } => format!("Spawned enemy {} lost sight of {}.", enemy_id, subject_id),
+        GameEvent::SpawnedEnemyMoved {
+            enemy_id,
+            from_location_id,
+            to_location_id,
+            target_location_id,
+        } => format!(
+            "Spawned enemy {} moved from {} to {} toward {}.",
+            enemy_id, from_location_id, to_location_id, target_location_id
+        ),
+        GameEvent::SpawnedEnemyWaited {
+            enemy_id,
+            location_id,
+            reason,
+        } => format!(
+            "Spawned enemy {} waited at {}; reason: {}.",
+            enemy_id, location_id, reason
+        ),
+        GameEvent::SpawnedEnemyAttackedHazard {
+            enemy_id,
+            hazard_kind,
+            location_id,
+            break_chance_percent,
+            roll_percent,
+            broken,
+        } => format!(
+            "Spawned enemy {} attacked {:?} at {}; break chance {}%, roll {}, broken: {}.",
+            enemy_id, hazard_kind, location_id, break_chance_percent, roll_percent, broken
+        ),
         GameEvent::AttackWhiff => "Attack found no valid target.".to_owned(),
         GameEvent::Waited { location_id } => format!("Waited at {}.", location_id),
         GameEvent::ObjectiveCompleted { objective_id } => {
@@ -233,6 +300,14 @@ fn brief_for_event(bundle: &DatapackBundle, event: &GameEvent) -> Option<String>
             EncounterKind::Enemy => enemy_brief(bundle, target_id),
             EncounterKind::Boss => boss_brief(bundle, target_id),
         },
+        GameEvent::NoiseSpawnedEnemy { template_id, .. } => enemy_brief(bundle, template_id),
+        GameEvent::SightAttractorAcquired { enemy_id, .. }
+        | GameEvent::SightAttractorMissed { enemy_id, .. }
+        | GameEvent::SightAttractorLost { enemy_id, .. } => enemy_brief(bundle, enemy_id),
+        GameEvent::SpawnedEnemyMoved { enemy_id, .. }
+        | GameEvent::SpawnedEnemyWaited { enemy_id, .. }
+        | GameEvent::SpawnedEnemyAttackedHazard { enemy_id, .. } => enemy_brief(bundle, enemy_id),
+        GameEvent::NoiseAttractorShifted { location_id, .. } => location_brief(bundle, location_id),
         GameEvent::HelpShown
         | GameEvent::ActionRejected { .. }
         | GameEvent::MovementBlocked { .. }
@@ -263,11 +338,7 @@ fn item_brief(bundle: &DatapackBundle, item_id: &str) -> Option<String> {
 }
 
 fn enemy_brief(bundle: &DatapackBundle, enemy_id: &str) -> Option<String> {
-    bundle
-        .enemies
-        .iter()
-        .find(|enemy| enemy.id == enemy_id)
-        .and_then(|enemy| enemy.narrator_brief.clone())
+    find_enemy(bundle, enemy_id).and_then(|enemy| enemy.narrator_brief.clone())
 }
 
 fn boss_brief(bundle: &DatapackBundle, boss_id: &str) -> Option<String> {

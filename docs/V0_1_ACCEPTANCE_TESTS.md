@@ -128,7 +128,7 @@ The following should work:
 
 - the current noise state is visible in the `Game`, `Character`, and diagnostics surfaces
 - loud actions raise noise deterministically
-- waiting in a barricaded location lowers noise deterministically
+- successful non-noisy actions lower noise deterministically
 - exposed-route risk gets worse at higher noise where authored
 - the player can tell from the UI when noise is making an exposed route more dangerous
 

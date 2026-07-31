@@ -194,14 +194,26 @@ Noise is raised by:
 - `unlock`
 - `barricade`
 
-Noise is lowered by:
+Noise is lowered over time by successful non-noisy actions, including:
 
 - `wait` in a barricaded location
+- `look`
+- `move`
+- `inspect`
+- `take`
+- `equip`
+- non-unlocking `use` effects
 
 At `noise_level >= 2`:
 
 - exposed passive pressure in `Front Verandah` and `Back Garden` becomes `2` damage instead of `1`
 - retaliation in exposed outdoor fights can gain `+1` damage
+
+When noise crosses into `Swarming`, the reducer pulls one enemy template from the scenario enemy pool and spawns a runtime copy into a random outdoor yard square. The current implementation chooses deterministically from run state so saves, tests, and future handoff payloads remain replayable.
+
+The spawned copy remembers the latest location that produced noise. The first target is the location where noise reached `Swarming`, but later successful noisy actions shift existing spawned threats toward the new source. On later successful turns, each spawned threat either waits or moves one legal map tile toward its current noise source. In `Property Siege Classic`, locked doors and barricaded locations block this movement, so securing an approach can hold a spawned threat out of that route.
+
+If a spawned threat reaches a blocking hazard, it attacks the hazard with a deterministic `35%` break chance. A broken barricade becomes unbarricaded. A broken locked gate becomes passable and is shown as `broken`, not normally unlocked.
 
 ## Threat Forecast Meanings
 

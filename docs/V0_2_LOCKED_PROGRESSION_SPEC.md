@@ -171,6 +171,7 @@ The schema should support future generalization, but this implementation should 
 Minimum required truth:
 
 - whether `garage` is locked or unlocked
+- whether a formerly locked gate is broken open rather than normally unlocked
 
 Recommended future-friendly shape:
 
@@ -192,6 +193,7 @@ Required surfaces:
 Recommended `v0.2` first-pass presentation:
 
 - current exits list should still show `Garage`, but indicate it is locked
+- broken locked gates should show a distinct `broken` state
 - map tile should visually distinguish locked vs unlocked garage
 - diagnostics should include lock-state truth explicitly
 
@@ -205,6 +207,7 @@ Required persistence behavior:
 
 - a locked garage stays locked after save/load
 - an unlocked garage stays unlocked after save/load
+- a broken-open gate stays broken after save/load
 
 ## Current Verified Behaviors
 
@@ -213,6 +216,7 @@ Current automated coverage includes:
 - generated run starts with `garage` and `back_garden` locked
 - moving to a locked target fails cleanly
 - taking `house_keys` then unlocking a reachable target succeeds
+- spawned enemies can break a locked gate into a passable broken-open state
 - ambiguous `use house_keys` prompts explicit targeting
 - unlocked gate state survives save/load
 

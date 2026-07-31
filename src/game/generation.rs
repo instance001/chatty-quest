@@ -79,6 +79,7 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         .map(|location| location.id.clone())
         .collect::<HashSet<_>>();
     let barricaded_locations = HashSet::new();
+    let broken_locked_locations = HashSet::new();
 
     let location_name = bundle
         .locations
@@ -119,8 +120,16 @@ pub fn generate_new_run(bundle: &DatapackBundle) -> GeneratedRun {
         location_enemies,
         location_bosses,
         locked_locations,
+        broken_locked_locations,
         barricaded_locations,
         noise_level: 0,
+        noise_spawn_count: 0,
+        spawned_enemy_targets: HashMap::new(),
+        spawned_enemy_origins: HashMap::new(),
+        spawned_enemy_searching: HashSet::new(),
+        spawned_enemy_sight_targets: HashMap::new(),
+        spawned_enemy_sight_subjects: HashMap::new(),
+        spawned_enemy_sight_delays: HashMap::new(),
         boundary_response: bundle.rules.boundary_response.clone(),
         rolling_summary: vec![format!(
             "Run started for scenario '{}'.",
@@ -201,7 +210,15 @@ mod tests {
         );
         assert!(state.locked_locations.contains("garage"));
         assert!(state.locked_locations.contains("back_garden"));
+        assert!(state.broken_locked_locations.is_empty());
         assert!(state.barricaded_locations.is_empty());
         assert_eq!(state.noise_level, 0);
+        assert_eq!(state.noise_spawn_count, 0);
+        assert!(state.spawned_enemy_targets.is_empty());
+        assert!(state.spawned_enemy_origins.is_empty());
+        assert!(state.spawned_enemy_searching.is_empty());
+        assert!(state.spawned_enemy_sight_targets.is_empty());
+        assert!(state.spawned_enemy_sight_subjects.is_empty());
+        assert!(state.spawned_enemy_sight_delays.is_empty());
     }
 }

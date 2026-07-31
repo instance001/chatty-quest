@@ -1,8 +1,12 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use crate::data::datapacks::DatapackBundle;
 
-use super::actions::{ActionOutcome, EncounterKind, GameAction, GameEvent, ItemUseEffect};
+use super::actions::{
+    ActionOutcome, EncounterKind, GameAction, GameEvent, ItemUseEffect, MovementHazardKind,
+};
 use super::queries::{
-    describe_current_location, describe_location, equipped_damage, find_boss,
+    describe_current_location, describe_location, enemy_template_id, equipped_damage, find_boss,
     find_boss_by_name_or_id, find_enemy, find_enemy_by_name_or_id, find_item,
     find_item_by_name_or_id, find_location, find_location_by_name_or_id, is_location_barricaded,
     is_location_locked, matches_name, unlock_targets_for_item,
@@ -10,6 +14,7 @@ use super::queries::{
 use super::state::{InventoryEntry, RunState};
 
 const ROLLING_SUMMARY_LIMIT: usize = 24;
+const MAX_NOISE_LEVEL: i32 = 3;
 
 pub fn apply_action(
     state: &mut RunState,
@@ -50,7 +55,10 @@ pub fn apply_action(
         GameAction::Wait => handle_wait(state, bundle),
     };
 
-    apply_noise_for_action(state, &action_for_noise, &mut outcome);
+    apply_noise_for_action(state, bundle, &action_for_noise, &mut outcome);
+    if state.hp > 0 && !action_was_rejected_or_blocked(&outcome) {
+        apply_spawned_enemy_turns(state, bundle, &mut outcome);
+    }
 
     let objective_after = objective_condition_statuses(state);
     outcome.lines.extend(objective_progress_lines(
@@ -249,9 +257,33 @@ fn handle_inspect(state: &RunState, bundle: &DatapackBundle, target: &str) -> Ac
         };
     }
 
+    if let Some(enemy_id) = state
+        .location_enemies
+        .get(&state.current_location_id)
+        .and_then(|enemy_ids| {
+            enemy_ids
+                .iter()
+                .rev()
+                .find(|enemy_id| {
+                    state.enemies_alive.contains(*enemy_id)
+                        && find_enemy(bundle, enemy_id)
+                            .is_some_and(|enemy| matches_name(target, &enemy.id, &enemy.name))
+                })
+                .cloned()
+        })
+        && let Some(enemy) = find_enemy(bundle, &enemy_id)
+    {
+        let mut lines = vec![format!("{}: {}", enemy.name, enemy.description)];
+        lines.extend(inspect_enemy_state_lines(state, bundle, &enemy_id));
+        return ActionOutcome {
+            events: vec![GameEvent::Inspected { target: enemy_id }],
+            lines,
+        };
+    }
+
     if let Some(enemy) = find_enemy_by_name_or_id(bundle, target) {
         let mut lines = vec![format!("{}: {}", enemy.name, enemy.description)];
-        lines.extend(inspect_enemy_state_lines(state, &enemy.id));
+        lines.extend(inspect_enemy_state_lines(state, bundle, &enemy.id));
         return ActionOutcome {
             events: vec![GameEvent::Inspected {
                 target: enemy.id.clone(),
@@ -262,7 +294,7 @@ fn handle_inspect(state: &RunState, bundle: &DatapackBundle, target: &str) -> Ac
 
     if let Some(boss) = find_boss_by_name_or_id(bundle, target) {
         let mut lines = vec![format!("{}: {}", boss.name, boss.description)];
-        lines.extend(inspect_boss_state_lines(state, &boss.id));
+        lines.extend(inspect_boss_state_lines(state, bundle, &boss.id));
         return ActionOutcome {
             events: vec![GameEvent::Inspected {
                 target: boss.id.clone(),
@@ -499,6 +531,15 @@ fn handle_unlock(state: &mut RunState, bundle: &DatapackBundle, target: &str) ->
             lines: vec!["That location has no gate to unlock.".to_owned()],
         };
     };
+
+    if state.broken_locked_locations.contains(&location.id) {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "That gate is already broken open.".to_owned(),
+            }],
+            lines: vec!["That gate is already broken open.".to_owned()],
+        };
+    }
 
     if !state.inventory.iter().any(|item| item.id == unlock_item_id) {
         return ActionOutcome {
@@ -771,6 +812,12 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
         if *enemy_damage <= 0 {
             state.enemies_alive.remove(&enemy_id);
             state.enemies_defeated.insert(enemy_id.clone());
+            state.spawned_enemy_targets.remove(&enemy_id);
+            state.spawned_enemy_origins.remove(&enemy_id);
+            state.spawned_enemy_searching.remove(&enemy_id);
+            state.spawned_enemy_sight_targets.remove(&enemy_id);
+            state.spawned_enemy_sight_subjects.remove(&enemy_id);
+            state.spawned_enemy_sight_delays.remove(&enemy_id);
             if let Some(entries) = state.location_enemies.get_mut(&current_location) {
                 entries.retain(|entry| entry != &enemy_id);
             }
@@ -778,7 +825,7 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
                 .map(|enemy| enemy.name.clone())
                 .unwrap_or_else(|| enemy_id.clone());
             lines.push(format!("{} goes down.", enemy_name));
-            if let Some(defeat_line) = enemy_defeat_line(&enemy_id) {
+            if let Some(defeat_line) = enemy_defeat_line(enemy_template_id(&enemy_id)) {
                 lines.push(defeat_line.to_owned());
             }
         } else {
@@ -806,7 +853,8 @@ fn handle_attack(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome
                     remaining_hp: state.hp,
                 });
                 lines.push(format!("The enemy hits back for {} damage.", retaliation));
-                if let Some(retaliation_line) = enemy_retaliation_line(&enemy_id) {
+                if let Some(retaliation_line) = enemy_retaliation_line(enemy_template_id(&enemy_id))
+                {
                     lines.push(retaliation_line.to_owned());
                 }
                 lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
@@ -977,16 +1025,25 @@ fn handle_wait(state: &mut RunState, bundle: &DatapackBundle) -> ActionOutcome {
     ActionOutcome { events, lines }
 }
 
-fn apply_noise_for_action(state: &mut RunState, action: &GameAction, outcome: &mut ActionOutcome) {
+fn apply_noise_for_action(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    action: &GameAction,
+    outcome: &mut ActionOutcome,
+) {
+    if action_was_rejected_or_blocked(outcome) {
+        return;
+    }
+
     match action {
-        GameAction::Attack => raise_noise(state, 1, &mut outcome.lines),
+        GameAction::Attack => raise_noise(state, bundle, 1, outcome),
         GameAction::Unlock { .. } => {
             if outcome
                 .events
                 .iter()
                 .any(|event| matches!(event, GameEvent::LocationUnlocked { .. }))
             {
-                raise_noise(state, 1, &mut outcome.lines);
+                raise_noise(state, bundle, 1, outcome);
             }
         }
         GameAction::Barricade { .. } => {
@@ -995,41 +1052,1096 @@ fn apply_noise_for_action(state: &mut RunState, action: &GameAction, outcome: &m
                 .iter()
                 .any(|event| matches!(event, GameEvent::LocationBarricaded { .. }))
             {
-                raise_noise(state, 1, &mut outcome.lines);
+                raise_noise(state, bundle, 1, outcome);
             }
         }
-        GameAction::Wait => {
-            if state
-                .barricaded_locations
-                .contains(&state.current_location_id)
-            {
-                lower_noise(state, 1, &mut outcome.lines);
-            }
-        }
-        _ => {}
+        _ => lower_noise(state, 1, &mut outcome.lines),
     }
 }
 
-fn raise_noise(state: &mut RunState, amount: i32, lines: &mut Vec<String>) {
+fn action_was_rejected_or_blocked(outcome: &ActionOutcome) -> bool {
+    outcome.events.iter().any(|event| {
+        matches!(
+            event,
+            GameEvent::ActionRejected { .. } | GameEvent::MovementBlocked { .. }
+        )
+    })
+}
+
+fn raise_noise(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    amount: i32,
+    outcome: &mut ActionOutcome,
+) {
     let before = state.noise_level;
-    state.noise_level = (state.noise_level + amount).clamp(0, 3);
+    state.noise_level = (state.noise_level + amount).clamp(0, MAX_NOISE_LEVEL);
     if state.noise_level != before {
-        lines.push(format!(
+        outcome.lines.push(format!(
             "Noise rises to {}.",
             noise_label(state.noise_level)
         ));
+    }
+    retarget_spawned_enemies_to_noise_source(state, bundle, outcome);
+    if before < MAX_NOISE_LEVEL && state.noise_level == MAX_NOISE_LEVEL {
+        spawn_noise_enemy(state, bundle, outcome);
     }
 }
 
 fn lower_noise(state: &mut RunState, amount: i32, lines: &mut Vec<String>) {
     let before = state.noise_level;
-    state.noise_level = (state.noise_level - amount).clamp(0, 3);
+    state.noise_level = (state.noise_level - amount).clamp(0, MAX_NOISE_LEVEL);
     if state.noise_level != before {
         lines.push(format!(
             "Noise settles to {}.",
             noise_label(state.noise_level)
         ));
     }
+}
+
+fn spawn_noise_enemy(state: &mut RunState, bundle: &DatapackBundle, outcome: &mut ActionOutcome) {
+    let Some(enemy) = select_noise_spawn_enemy(state, bundle) else {
+        return;
+    };
+    let Some(location) = select_noise_spawn_location(state, bundle) else {
+        return;
+    };
+
+    let spawn_number = state.noise_spawn_count + 1;
+    let enemy_id = format!("noise_spawn_{}_{}", spawn_number, enemy.id);
+    state.noise_spawn_count = spawn_number;
+    state.enemy_hp.insert(enemy_id.clone(), enemy.hp);
+    state.enemies_alive.insert(enemy_id.clone());
+    state
+        .spawned_enemy_targets
+        .insert(enemy_id.clone(), state.current_location_id.clone());
+    state
+        .spawned_enemy_origins
+        .insert(enemy_id.clone(), location.id.clone());
+    state.spawned_enemy_searching.remove(&enemy_id);
+    state.spawned_enemy_sight_targets.remove(&enemy_id);
+    state.spawned_enemy_sight_subjects.remove(&enemy_id);
+    state.spawned_enemy_sight_delays.remove(&enemy_id);
+    state
+        .location_enemies
+        .entry(location.id.clone())
+        .or_default()
+        .push(enemy_id.clone());
+
+    outcome.events.push(GameEvent::NoiseSpawnedEnemy {
+        enemy_id,
+        template_id: enemy.id.clone(),
+        location_id: location.id.clone(),
+    });
+    outcome.lines.push(format!(
+        "Noise peaks at Swarming. {} is pulled into {}.",
+        enemy.name, location.name
+    ));
+}
+
+fn retarget_spawned_enemies_to_noise_source(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    outcome: &mut ActionOutcome,
+) {
+    let source_location_id = state.current_location_id.clone();
+    let mut retargeted_enemy_ids = state
+        .enemies_alive
+        .iter()
+        .filter(|enemy_id| is_noise_spawned_enemy(enemy_id))
+        .filter(|enemy_id| spawned_enemy_can_hear(bundle, enemy_id))
+        .filter(|enemy_id| {
+            state
+                .spawned_enemy_targets
+                .get(*enemy_id)
+                .is_none_or(|target| target != &source_location_id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    retargeted_enemy_ids.sort();
+
+    if retargeted_enemy_ids.is_empty() {
+        return;
+    }
+
+    for enemy_id in &retargeted_enemy_ids {
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), source_location_id.clone());
+        state.spawned_enemy_searching.remove(enemy_id);
+        state.spawned_enemy_sight_targets.remove(enemy_id);
+        state.spawned_enemy_sight_subjects.remove(enemy_id);
+        state.spawned_enemy_sight_delays.remove(enemy_id);
+    }
+
+    outcome.events.push(GameEvent::NoiseAttractorShifted {
+        location_id: source_location_id.clone(),
+        enemy_ids: retargeted_enemy_ids,
+    });
+    outcome.lines.push(format!(
+        "The latest noise becomes the attractor. Spawned threats turn toward {}.",
+        location_display_name_for_state_only(&source_location_id)
+    ));
+}
+
+fn apply_spawned_enemy_turns(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    outcome: &mut ActionOutcome,
+) {
+    let spawned_this_turn = outcome
+        .events
+        .iter()
+        .filter_map(|event| {
+            if let GameEvent::NoiseSpawnedEnemy { enemy_id, .. } = event {
+                Some(enemy_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<HashSet<_>>();
+    let mut spawned_ids = state
+        .enemies_alive
+        .iter()
+        .filter(|enemy_id| is_noise_spawned_enemy(enemy_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    spawned_ids.sort();
+
+    for enemy_id in spawned_ids {
+        if spawned_this_turn.contains(&enemy_id) {
+            continue;
+        }
+        let Some(current_location_id) = spawned_enemy_location(state, &enemy_id) else {
+            continue;
+        };
+        let sighted_this_turn = refresh_spawned_enemy_sight_target(
+            state,
+            bundle,
+            outcome,
+            &enemy_id,
+            &current_location_id,
+        );
+        let attractor = spawned_enemy_active_attractor(state, &enemy_id);
+        let target_location_id = attractor.location_id.clone();
+        if current_location_id == target_location_id
+            && !matches!(attractor.kind, SpawnedEnemyAttractorKind::Sight)
+        {
+            state.spawned_enemy_searching.insert(enemy_id.clone());
+        }
+        let is_searching = state.spawned_enemy_searching.contains(&enemy_id);
+
+        let mut step = spawned_enemy_next_step(
+            state,
+            bundle,
+            &enemy_id,
+            &current_location_id,
+            &target_location_id,
+            is_searching,
+        );
+        if matches!(attractor.kind, SpawnedEnemyAttractorKind::Sight)
+            && !is_searching
+            && matches!(step, SpawnedEnemyStep::Move { .. })
+            && sight_chase_should_delay(
+                bundle,
+                state,
+                &enemy_id,
+                &current_location_id,
+                &target_location_id,
+            )
+        {
+            state.spawned_enemy_sight_delays.insert(enemy_id.clone(), 1);
+            step = SpawnedEnemyStep::Wait(format!(
+                "chasing {} by sight takes an extra moment",
+                state
+                    .spawned_enemy_sight_subjects
+                    .get(&enemy_id)
+                    .map(String::as_str)
+                    .unwrap_or("the attractor")
+            ));
+        } else if sighted_this_turn {
+            state.spawned_enemy_sight_delays.remove(&enemy_id);
+        }
+
+        match step {
+            SpawnedEnemyStep::Move {
+                to_location_id,
+                step_target_location_id,
+            } => {
+                move_spawned_enemy(state, &enemy_id, &current_location_id, &to_location_id);
+                let event_target_location_id =
+                    step_target_location_id.unwrap_or_else(|| target_location_id.clone());
+                outcome.events.push(GameEvent::SpawnedEnemyMoved {
+                    enemy_id: enemy_id.clone(),
+                    from_location_id: current_location_id.clone(),
+                    to_location_id: to_location_id.clone(),
+                    target_location_id: event_target_location_id,
+                });
+                outcome.lines.push(format!(
+                    "{} shifts from {} toward {}.",
+                    enemy_display_name(bundle, &enemy_id),
+                    location_display_name(bundle, &current_location_id),
+                    location_display_name(bundle, &to_location_id)
+                ));
+            }
+            SpawnedEnemyStep::Wait(reason) => {
+                outcome.events.push(GameEvent::SpawnedEnemyWaited {
+                    enemy_id: enemy_id.clone(),
+                    location_id: current_location_id.clone(),
+                    reason: reason.clone(),
+                });
+                outcome.lines.push(format!(
+                    "{} waits at {}: {}.",
+                    enemy_display_name(bundle, &enemy_id),
+                    location_display_name(bundle, &current_location_id),
+                    reason
+                ));
+            }
+            SpawnedEnemyStep::AttackHazard(hazard) => {
+                let break_chance_percent = spawned_hazard_break_chance_percent(bundle);
+                let roll_percent =
+                    deterministic_hazard_break_roll(state, &enemy_id, &hazard.location_id);
+                let broken = roll_percent < break_chance_percent;
+                if broken {
+                    break_movement_hazard(state, &hazard);
+                }
+                outcome.events.push(GameEvent::SpawnedEnemyAttackedHazard {
+                    enemy_id: enemy_id.clone(),
+                    hazard_kind: hazard.kind.clone(),
+                    location_id: hazard.location_id.clone(),
+                    break_chance_percent,
+                    roll_percent,
+                    broken,
+                });
+                outcome.lines.push(spawned_enemy_hazard_attack_line(
+                    bundle, &enemy_id, &hazard, broken,
+                ));
+            }
+        }
+    }
+}
+
+enum SpawnedEnemyStep {
+    Move {
+        to_location_id: String,
+        step_target_location_id: Option<String>,
+    },
+    Wait(String),
+    AttackHazard(MovementHazard),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpawnedEnemyAttractorKind {
+    Sight,
+    Noise,
+    SearchFallback,
+}
+
+struct SpawnedEnemyAttractor {
+    kind: SpawnedEnemyAttractorKind,
+    location_id: String,
+}
+
+struct MovementHazard {
+    kind: MovementHazardKind,
+    location_id: String,
+}
+
+#[derive(Clone)]
+struct SightAttractor {
+    subject_id: String,
+    location_id: String,
+}
+
+fn spawned_enemy_active_attractor(state: &RunState, enemy_id: &str) -> SpawnedEnemyAttractor {
+    if let Some(location_id) = state.spawned_enemy_sight_targets.get(enemy_id) {
+        return SpawnedEnemyAttractor {
+            kind: SpawnedEnemyAttractorKind::Sight,
+            location_id: location_id.clone(),
+        };
+    }
+
+    if let Some(location_id) = state.spawned_enemy_targets.get(enemy_id) {
+        return SpawnedEnemyAttractor {
+            kind: SpawnedEnemyAttractorKind::Noise,
+            location_id: location_id.clone(),
+        };
+    }
+
+    SpawnedEnemyAttractor {
+        kind: SpawnedEnemyAttractorKind::SearchFallback,
+        location_id: state.current_location_id.clone(),
+    }
+}
+
+fn refresh_spawned_enemy_sight_target(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    outcome: &mut ActionOutcome,
+    enemy_id: &str,
+    current_location_id: &str,
+) -> bool {
+    if !spawned_enemy_can_see(bundle, enemy_id) {
+        clear_spawned_enemy_sight_to_search(state, bundle, outcome, enemy_id);
+        return false;
+    }
+
+    if let Some(attractor) =
+        visible_sight_attractor_for_enemy(state, bundle, enemy_id, current_location_id)
+    {
+        let roll_percent =
+            deterministic_sight_acquire_roll(state, enemy_id, current_location_id, &attractor);
+        let detect_chance_percent = sight_acquire_chance_percent(bundle);
+        if roll_percent >= detect_chance_percent {
+            outcome.events.push(GameEvent::SightAttractorMissed {
+                enemy_id: enemy_id.to_owned(),
+                subject_id: attractor.subject_id.clone(),
+                location_id: attractor.location_id.clone(),
+                detect_chance_percent,
+                roll_percent,
+            });
+            outcome.lines.push(format!(
+                "{} {}.",
+                enemy_display_name(bundle, enemy_id),
+                sight_miss_flavor_line(state, enemy_id, &attractor.subject_id)
+            ));
+            clear_spawned_enemy_sight_to_search(state, bundle, outcome, enemy_id);
+            return false;
+        }
+
+        let target_changed = state
+            .spawned_enemy_sight_targets
+            .get(enemy_id)
+            .is_none_or(|location_id| location_id != &attractor.location_id)
+            || state
+                .spawned_enemy_sight_subjects
+                .get(enemy_id)
+                .is_none_or(|subject_id| subject_id != &attractor.subject_id);
+        state
+            .spawned_enemy_sight_targets
+            .insert(enemy_id.to_owned(), attractor.location_id.clone());
+        state
+            .spawned_enemy_sight_subjects
+            .insert(enemy_id.to_owned(), attractor.subject_id.clone());
+        state.spawned_enemy_searching.remove(enemy_id);
+        if target_changed {
+            outcome.events.push(GameEvent::SightAttractorAcquired {
+                enemy_id: enemy_id.to_owned(),
+                subject_id: attractor.subject_id.clone(),
+                location_id: attractor.location_id.clone(),
+            });
+            outcome.lines.push(format!(
+                "{} catches sight of {} at {}.",
+                enemy_display_name(bundle, enemy_id),
+                subject_display_name(bundle, &attractor.subject_id),
+                location_display_name(bundle, &attractor.location_id)
+            ));
+        }
+        return true;
+    }
+
+    clear_spawned_enemy_sight_to_search(state, bundle, outcome, enemy_id);
+
+    false
+}
+
+fn clear_spawned_enemy_sight_to_search(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    outcome: &mut ActionOutcome,
+    enemy_id: &str,
+) -> bool {
+    if state.spawned_enemy_sight_targets.contains_key(enemy_id)
+        || state.spawned_enemy_sight_delays.contains_key(enemy_id)
+    {
+        state.spawned_enemy_sight_delays.remove(enemy_id);
+        let subject_id = state
+            .spawned_enemy_sight_subjects
+            .remove(enemy_id)
+            .unwrap_or_else(|| "the last seen attractor".to_owned());
+        state.spawned_enemy_sight_targets.remove(enemy_id);
+        state.spawned_enemy_searching.insert(enemy_id.to_owned());
+        outcome.events.push(GameEvent::SightAttractorLost {
+            enemy_id: enemy_id.to_owned(),
+            subject_id: subject_id.clone(),
+        });
+        outcome.lines.push(format!(
+            "{} {}.",
+            enemy_display_name(bundle, enemy_id),
+            sight_lost_flavor_line(state, enemy_id, &subject_id)
+        ));
+        return true;
+    }
+    false
+}
+
+fn visible_sight_attractor_for_enemy(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    enemy_id: &str,
+    current_location_id: &str,
+) -> Option<SightAttractor> {
+    if spawned_enemy_can_see_location(
+        state,
+        bundle,
+        current_location_id,
+        &state.current_location_id,
+    ) {
+        return Some(SightAttractor {
+            subject_id: "player".to_owned(),
+            location_id: state.current_location_id.clone(),
+        });
+    }
+
+    if state.spawned_enemy_targets.contains_key(enemy_id)
+        && !state.spawned_enemy_searching.contains(enemy_id)
+    {
+        return None;
+    }
+
+    let mut subjects = Vec::new();
+    for (location_id, enemy_ids) in &state.location_enemies {
+        if !spawned_enemy_can_see_location(state, bundle, current_location_id, location_id) {
+            continue;
+        }
+        for subject_id in enemy_ids {
+            if subject_id != enemy_id && state.enemies_alive.contains(subject_id) {
+                subjects.push(SightAttractor {
+                    subject_id: subject_id.clone(),
+                    location_id: location_id.clone(),
+                });
+            }
+        }
+    }
+    for (location_id, boss_ids) in &state.location_bosses {
+        if !spawned_enemy_can_see_location(state, bundle, current_location_id, location_id) {
+            continue;
+        }
+        for subject_id in boss_ids {
+            if state.bosses_alive.contains(subject_id) {
+                subjects.push(SightAttractor {
+                    subject_id: subject_id.clone(),
+                    location_id: location_id.clone(),
+                });
+            }
+        }
+    }
+    subjects.sort_by(|left, right| {
+        left.location_id
+            .cmp(&right.location_id)
+            .then_with(|| left.subject_id.cmp(&right.subject_id))
+    });
+    subjects.into_iter().next()
+}
+
+fn spawned_enemy_can_see_location(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    from_location_id: &str,
+    to_location_id: &str,
+) -> bool {
+    if from_location_id == to_location_id {
+        return true;
+    }
+    legal_spawned_enemy_exits(state, bundle, from_location_id)
+        .iter()
+        .any(|exit_id| exit_id == to_location_id)
+}
+
+fn spawned_enemy_next_step(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    enemy_id: &str,
+    current_location_id: &str,
+    target_location_id: &str,
+    is_searching: bool,
+) -> SpawnedEnemyStep {
+    if is_searching {
+        return spawned_enemy_search_step(state, bundle, enemy_id, current_location_id);
+    }
+    if current_location_id == target_location_id {
+        return SpawnedEnemyStep::Wait("already at the attractor".to_owned());
+    }
+    if state.barricaded_locations.contains(current_location_id) {
+        return SpawnedEnemyStep::AttackHazard(MovementHazard {
+            kind: MovementHazardKind::Barricade,
+            location_id: current_location_id.to_owned(),
+        });
+    }
+
+    if state.datapack_id == "property_siege_classic" {
+        if let Some(hazard) = next_blocking_hazard_toward_target(
+            state,
+            bundle,
+            current_location_id,
+            target_location_id,
+        ) {
+            return SpawnedEnemyStep::AttackHazard(hazard);
+        }
+        if let Some(next_step) = shortest_legal_spawned_enemy_step(
+            state,
+            bundle,
+            current_location_id,
+            target_location_id,
+        ) {
+            return SpawnedEnemyStep::Move {
+                to_location_id: next_step,
+                step_target_location_id: None,
+            };
+        }
+        return SpawnedEnemyStep::Wait("no legal route reaches the noise source".to_owned());
+    }
+
+    let legal_exits = legal_spawned_enemy_exits(state, bundle, current_location_id);
+    if legal_exits.is_empty() {
+        return SpawnedEnemyStep::Wait("no legal exit is open".to_owned());
+    }
+    let index = deterministic_noise_index(
+        state,
+        legal_exits.len(),
+        enemy_id.bytes().fold(97usize, |accumulator, byte| {
+            accumulator.wrapping_mul(31).wrapping_add(byte as usize)
+        }),
+    );
+    SpawnedEnemyStep::Move {
+        to_location_id: legal_exits[index].clone(),
+        step_target_location_id: None,
+    }
+}
+
+fn spawned_enemy_search_step(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    enemy_id: &str,
+    current_location_id: &str,
+) -> SpawnedEnemyStep {
+    match deterministic_noise_index(
+        state,
+        3,
+        enemy_search_salt(enemy_id, current_location_id, 211),
+    ) {
+        0 => SpawnedEnemyStep::Wait(search_wait_flavor_line(
+            state,
+            enemy_id,
+            current_location_id,
+        )),
+        1 => spawned_enemy_random_search_step(state, bundle, enemy_id, current_location_id),
+        _ => spawned_enemy_return_step(state, bundle, current_location_id, enemy_id),
+    }
+}
+
+fn spawned_enemy_random_search_step(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    enemy_id: &str,
+    current_location_id: &str,
+) -> SpawnedEnemyStep {
+    let legal_exits = legal_spawned_enemy_exits(state, bundle, current_location_id);
+    if legal_exits.is_empty() {
+        return SpawnedEnemyStep::Wait(search_blocked_flavor_line(
+            state,
+            enemy_id,
+            current_location_id,
+        ));
+    }
+    let index = deterministic_noise_index(
+        state,
+        legal_exits.len(),
+        enemy_search_salt(enemy_id, current_location_id, 307),
+    );
+    SpawnedEnemyStep::Move {
+        to_location_id: legal_exits[index].clone(),
+        step_target_location_id: None,
+    }
+}
+
+fn spawned_enemy_return_step(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    current_location_id: &str,
+    enemy_id: &str,
+) -> SpawnedEnemyStep {
+    let Some(origin_location_id) = state.spawned_enemy_origins.get(enemy_id) else {
+        return SpawnedEnemyStep::Wait("searching without a known return point".to_owned());
+    };
+    if current_location_id == origin_location_id {
+        return SpawnedEnemyStep::Wait(returned_origin_flavor_line(
+            state,
+            enemy_id,
+            current_location_id,
+        ));
+    }
+    if state.datapack_id == "property_siege_classic" {
+        if let Some(hazard) = next_blocking_hazard_toward_target(
+            state,
+            bundle,
+            current_location_id,
+            origin_location_id,
+        ) {
+            return SpawnedEnemyStep::AttackHazard(hazard);
+        }
+        if let Some(next_step) = shortest_legal_spawned_enemy_step(
+            state,
+            bundle,
+            current_location_id,
+            origin_location_id,
+        ) {
+            return SpawnedEnemyStep::Move {
+                to_location_id: next_step,
+                step_target_location_id: Some(origin_location_id.clone()),
+            };
+        }
+        return SpawnedEnemyStep::Wait(return_blocked_flavor_line(
+            state,
+            enemy_id,
+            current_location_id,
+        ));
+    }
+
+    spawned_enemy_random_search_step(state, bundle, enemy_id, current_location_id)
+}
+
+fn next_blocking_hazard_toward_target(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    current_location_id: &str,
+    target_location_id: &str,
+) -> Option<MovementHazard> {
+    let next_step =
+        shortest_map_step_ignoring_hazards(bundle, current_location_id, target_location_id)?;
+    movement_hazard_for_location(state, &next_step)
+}
+
+fn movement_hazard_for_location(state: &RunState, location_id: &str) -> Option<MovementHazard> {
+    if state.barricaded_locations.contains(location_id) {
+        Some(MovementHazard {
+            kind: MovementHazardKind::Barricade,
+            location_id: location_id.to_owned(),
+        })
+    } else if state.locked_locations.contains(location_id) {
+        Some(MovementHazard {
+            kind: MovementHazardKind::LockedGate,
+            location_id: location_id.to_owned(),
+        })
+    } else {
+        None
+    }
+}
+
+fn shortest_map_step_ignoring_hazards(
+    bundle: &DatapackBundle,
+    current_location_id: &str,
+    target_location_id: &str,
+) -> Option<String> {
+    find_location(bundle, target_location_id)?;
+
+    let mut queue = VecDeque::from([current_location_id.to_owned()]);
+    let mut previous = HashMap::from([(current_location_id.to_owned(), None::<String>)]);
+
+    while let Some(location_id) = queue.pop_front() {
+        if location_id == target_location_id {
+            break;
+        }
+
+        let Some(location) = find_location(bundle, &location_id) else {
+            continue;
+        };
+
+        for exit_id in &location.connections {
+            if find_location(bundle, exit_id).is_none() || previous.contains_key(exit_id) {
+                continue;
+            }
+            previous.insert(exit_id.clone(), Some(location_id.clone()));
+            queue.push_back(exit_id.clone());
+        }
+    }
+
+    previous.get(target_location_id)?;
+    let mut step = target_location_id.to_owned();
+    while let Some(Some(parent)) = previous.get(&step) {
+        if parent == current_location_id {
+            return Some(step);
+        }
+        step = parent.clone();
+    }
+    None
+}
+
+fn deterministic_hazard_break_roll(
+    state: &RunState,
+    enemy_id: &str,
+    hazard_location_id: &str,
+) -> u8 {
+    let seed = format!(
+        "{}:{}:{}:{}:{}",
+        enemy_id,
+        hazard_location_id,
+        state.noise_spawn_count,
+        state.rolling_summary.len(),
+        state.noise_level
+    );
+    (seed.bytes().fold(0usize, |accumulator, byte| {
+        accumulator.wrapping_mul(33).wrapping_add(byte as usize)
+    }) % 100) as u8
+}
+
+fn spawned_hazard_break_chance_percent(bundle: &DatapackBundle) -> u8 {
+    bundle.rules.spawned_hazard_break_chance_percent.min(100)
+}
+
+fn sight_acquire_chance_percent(bundle: &DatapackBundle) -> u8 {
+    bundle.rules.sight_acquire_chance_percent.min(100)
+}
+
+fn sight_chase_delay_chance_percent(bundle: &DatapackBundle) -> u8 {
+    bundle.rules.sight_chase_delay_chance_percent.min(100)
+}
+
+fn sight_chase_should_delay(
+    bundle: &DatapackBundle,
+    state: &RunState,
+    enemy_id: &str,
+    current_location_id: &str,
+    target_location_id: &str,
+) -> bool {
+    deterministic_sight_chase_roll(state, enemy_id, current_location_id, target_location_id)
+        < sight_chase_delay_chance_percent(bundle)
+}
+
+fn deterministic_sight_acquire_roll(
+    state: &RunState,
+    enemy_id: &str,
+    current_location_id: &str,
+    attractor: &SightAttractor,
+) -> u8 {
+    let seed = format!(
+        "{}:{}:{}:{}:{}:{}",
+        enemy_id,
+        current_location_id,
+        attractor.subject_id,
+        attractor.location_id,
+        state.rolling_summary.len(),
+        state.noise_spawn_count
+    );
+    (seed.bytes().fold(0usize, |accumulator, byte| {
+        accumulator.wrapping_mul(37).wrapping_add(byte as usize)
+    }) % 100) as u8
+}
+
+fn deterministic_sight_chase_roll(
+    state: &RunState,
+    enemy_id: &str,
+    current_location_id: &str,
+    target_location_id: &str,
+) -> u8 {
+    let seed = format!(
+        "{}:{}:{}:{}:{}:{}",
+        enemy_id,
+        current_location_id,
+        target_location_id,
+        state.current_location_id,
+        state.rolling_summary.len(),
+        state.noise_spawn_count
+    );
+    (seed.bytes().fold(0usize, |accumulator, byte| {
+        accumulator.wrapping_mul(31).wrapping_add(byte as usize)
+    }) % 100) as u8
+}
+
+fn break_movement_hazard(state: &mut RunState, hazard: &MovementHazard) {
+    match hazard.kind {
+        MovementHazardKind::Barricade => {
+            state.barricaded_locations.remove(&hazard.location_id);
+        }
+        MovementHazardKind::LockedGate => {
+            state.locked_locations.remove(&hazard.location_id);
+            state
+                .broken_locked_locations
+                .insert(hazard.location_id.clone());
+        }
+    }
+}
+
+fn spawned_enemy_hazard_attack_line(
+    bundle: &DatapackBundle,
+    enemy_id: &str,
+    hazard: &MovementHazard,
+    broken: bool,
+) -> String {
+    let enemy_name = enemy_display_name(bundle, enemy_id);
+    let location_name = location_display_name(bundle, &hazard.location_id);
+    match (&hazard.kind, broken) {
+        (MovementHazardKind::Barricade, true) => {
+            format!("{enemy_name} tears through the barricade at {location_name}.")
+        }
+        (MovementHazardKind::Barricade, false) => {
+            format!("{enemy_name} hammers the barricade at {location_name}, but it holds.")
+        }
+        (MovementHazardKind::LockedGate, true) => {
+            format!("{enemy_name} breaks the locked gate at {location_name}.")
+        }
+        (MovementHazardKind::LockedGate, false) => {
+            format!(
+                "{enemy_name} throws itself at the locked gate at {location_name}, but it holds."
+            )
+        }
+    }
+}
+
+fn shortest_legal_spawned_enemy_step(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    current_location_id: &str,
+    target_location_id: &str,
+) -> Option<String> {
+    find_location(bundle, target_location_id)?;
+
+    let mut queue = VecDeque::from([current_location_id.to_owned()]);
+    let mut previous = HashMap::from([(current_location_id.to_owned(), None::<String>)]);
+
+    while let Some(location_id) = queue.pop_front() {
+        if location_id == target_location_id {
+            break;
+        }
+
+        for exit_id in legal_spawned_enemy_exits(state, bundle, &location_id) {
+            if previous.contains_key(&exit_id) {
+                continue;
+            }
+            previous.insert(exit_id.clone(), Some(location_id.clone()));
+            queue.push_back(exit_id);
+        }
+    }
+
+    previous.get(target_location_id)?;
+    let mut step = target_location_id.to_owned();
+    while let Some(Some(parent)) = previous.get(&step) {
+        if parent == current_location_id {
+            return Some(step);
+        }
+        step = parent.clone();
+    }
+    None
+}
+
+fn legal_spawned_enemy_exits(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    location_id: &str,
+) -> Vec<String> {
+    if state.barricaded_locations.contains(location_id) {
+        return Vec::new();
+    }
+
+    let Some(location) = find_location(bundle, location_id) else {
+        return Vec::new();
+    };
+
+    location
+        .connections
+        .iter()
+        .filter(|exit_id| find_location(bundle, exit_id).is_some())
+        .filter(|exit_id| !state.locked_locations.contains(*exit_id))
+        .filter(|exit_id| !state.barricaded_locations.contains(*exit_id))
+        .cloned()
+        .collect()
+}
+
+fn move_spawned_enemy(
+    state: &mut RunState,
+    enemy_id: &str,
+    from_location_id: &str,
+    to_location_id: &str,
+) {
+    if let Some(entries) = state.location_enemies.get_mut(from_location_id) {
+        entries.retain(|entry| entry != enemy_id);
+    }
+    let destination = state
+        .location_enemies
+        .entry(to_location_id.to_owned())
+        .or_default();
+    if !destination.iter().any(|entry| entry == enemy_id) {
+        destination.push(enemy_id.to_owned());
+    }
+}
+
+fn spawned_enemy_location(state: &RunState, enemy_id: &str) -> Option<String> {
+    state
+        .location_enemies
+        .iter()
+        .find(|(_, enemy_ids)| enemy_ids.iter().any(|entry| entry == enemy_id))
+        .map(|(location_id, _)| location_id.clone())
+}
+
+fn is_noise_spawned_enemy(enemy_id: &str) -> bool {
+    enemy_id.starts_with("noise_spawn_")
+}
+
+fn spawned_enemy_can_hear(bundle: &DatapackBundle, enemy_id: &str) -> bool {
+    find_enemy(bundle, enemy_id).is_some_and(|enemy| enemy.can_hear)
+}
+
+fn spawned_enemy_can_see(bundle: &DatapackBundle, enemy_id: &str) -> bool {
+    find_enemy(bundle, enemy_id).is_some_and(|enemy| enemy.can_see)
+}
+
+fn enemy_search_salt(enemy_id: &str, location_id: &str, base: usize) -> usize {
+    format!("{enemy_id}:{location_id}")
+        .bytes()
+        .fold(base, |accumulator, byte| {
+            accumulator.wrapping_mul(31).wrapping_add(byte as usize)
+        })
+}
+
+fn deterministic_flavor_index(
+    state: &RunState,
+    enemy_id: &str,
+    context_id: &str,
+    len: usize,
+    salt: usize,
+) -> usize {
+    deterministic_noise_index(state, len, enemy_search_salt(enemy_id, context_id, salt))
+}
+
+fn search_wait_flavor_line(state: &RunState, enemy_id: &str, location_id: &str) -> String {
+    let variants = [
+        "searching the old noise source",
+        "searching the stale trail by habit",
+        "searching where the noise used to make sense",
+    ];
+    variants[deterministic_flavor_index(state, enemy_id, location_id, variants.len(), 401)]
+        .to_owned()
+}
+
+fn search_blocked_flavor_line(state: &RunState, enemy_id: &str, location_id: &str) -> String {
+    let variants = [
+        "searching, but no legal exit is open",
+        "searching the boxed-in space without finding a way through",
+        "searching, stalled by every closed route around it",
+    ];
+    variants[deterministic_flavor_index(state, enemy_id, location_id, variants.len(), 409)]
+        .to_owned()
+}
+
+fn returned_origin_flavor_line(state: &RunState, enemy_id: &str, location_id: &str) -> String {
+    let variants = [
+        "back at its spawn point with no fresh noise",
+        "back where it started, with nothing new to follow",
+        "back at origin, waiting for the next mistake",
+    ];
+    variants[deterministic_flavor_index(state, enemy_id, location_id, variants.len(), 419)]
+        .to_owned()
+}
+
+fn return_blocked_flavor_line(state: &RunState, enemy_id: &str, location_id: &str) -> String {
+    let variants = [
+        "no legal route back to its spawn point",
+        "searching for a way home, but the route will not open",
+        "trying to return to origin, but the map refuses",
+    ];
+    variants[deterministic_flavor_index(state, enemy_id, location_id, variants.len(), 421)]
+        .to_owned()
+}
+
+fn sight_miss_flavor_line(state: &RunState, enemy_id: &str, subject_id: &str) -> String {
+    let variants = [
+        "has a sightline toward the attractor, but does not catch a clear look",
+        "nearly catches the visual attractor, but the moment slips",
+        "stares down the sightline and still misses the trail",
+    ];
+    variants[deterministic_flavor_index(state, enemy_id, subject_id, variants.len(), 431)]
+        .to_owned()
+}
+
+fn sight_lost_flavor_line(state: &RunState, enemy_id: &str, subject_id: &str) -> String {
+    let variants = [
+        "loses sight of the attractor and starts searching",
+        "loses the visual trail and starts searching",
+        "loses contact and falls back into search",
+    ];
+    variants[deterministic_flavor_index(state, enemy_id, subject_id, variants.len(), 433)]
+        .to_owned()
+}
+
+fn enemy_display_name(bundle: &DatapackBundle, enemy_id: &str) -> String {
+    find_enemy(bundle, enemy_id)
+        .map(|enemy| enemy.name.clone())
+        .unwrap_or_else(|| enemy_id.to_owned())
+}
+
+fn subject_display_name(bundle: &DatapackBundle, subject_id: &str) -> String {
+    if subject_id == "player" {
+        return "you".to_owned();
+    }
+    find_enemy(bundle, subject_id)
+        .map(|enemy| enemy.name.clone())
+        .or_else(|| find_boss(bundle, subject_id).map(|boss| boss.name.clone()))
+        .unwrap_or_else(|| subject_id.to_owned())
+}
+
+fn location_display_name(bundle: &DatapackBundle, location_id: &str) -> String {
+    find_location(bundle, location_id)
+        .map(|location| location.name.clone())
+        .unwrap_or_else(|| location_id.to_owned())
+}
+
+fn location_display_name_for_state_only(location_id: &str) -> String {
+    location_id.replace('_', " ")
+}
+
+fn select_noise_spawn_enemy(
+    state: &RunState,
+    bundle: &DatapackBundle,
+) -> Option<crate::data::datapacks::EnemyTemplate> {
+    if bundle.enemies.is_empty() {
+        return None;
+    }
+    let enemies = bundle
+        .enemies
+        .iter()
+        .filter(|enemy| enemy.can_hear)
+        .collect::<Vec<_>>();
+    if enemies.is_empty() {
+        return None;
+    }
+    let index = deterministic_noise_index(state, enemies.len(), 17);
+    enemies.get(index).map(|enemy| (*enemy).clone())
+}
+
+fn select_noise_spawn_location(
+    state: &RunState,
+    bundle: &DatapackBundle,
+) -> Option<crate::data::datapacks::LocationTemplate> {
+    let locations = bundle
+        .locations
+        .iter()
+        .filter(|location| {
+            location.tags.iter().any(|tag| tag == "outdoor")
+                || location.id.contains("yard")
+                || location.id.contains("garden")
+        })
+        .collect::<Vec<_>>();
+    if locations.is_empty() {
+        return None;
+    }
+    let index = deterministic_noise_index(state, locations.len(), 53);
+    locations.get(index).map(|location| (*location).clone())
+}
+
+fn deterministic_noise_index(state: &RunState, len: usize, salt: usize) -> usize {
+    let location_score = state
+        .current_location_id
+        .bytes()
+        .fold(0usize, |accumulator, byte| {
+            accumulator.wrapping_mul(31).wrapping_add(byte as usize)
+        });
+    let summary_score = state.rolling_summary.len().wrapping_mul(13);
+    let spawn_score = (state.noise_spawn_count as usize).wrapping_mul(37);
+    location_score
+        .wrapping_add(summary_score)
+        .wrapping_add(spawn_score)
+        .wrapping_add(salt)
+        % len
 }
 
 fn noise_label(level: i32) -> &'static str {
@@ -1188,7 +2300,11 @@ fn item_pickup_lines(item_id: &str) -> Vec<String> {
     }
 }
 
-fn inspect_enemy_state_lines(state: &RunState, enemy_id: &str) -> Vec<String> {
+fn inspect_enemy_state_lines(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    enemy_id: &str,
+) -> Vec<String> {
     let alive = state.enemies_alive.contains(enemy_id);
     let remaining_hp = state.enemy_hp.get(enemy_id).copied().unwrap_or(0).max(0);
     let present_here = state
@@ -1209,6 +2325,10 @@ fn inspect_enemy_state_lines(state: &RunState, enemy_id: &str) -> Vec<String> {
             "Present here: {}",
             if present_here { "yes" } else { "no" }
         ));
+    }
+
+    if let Some(enemy) = find_enemy(bundle, enemy_id) {
+        lines.push(sense_line(enemy.can_hear, enemy.can_see));
     }
 
     match enemy_id {
@@ -1234,7 +2354,11 @@ fn inspect_enemy_state_lines(state: &RunState, enemy_id: &str) -> Vec<String> {
     lines
 }
 
-fn inspect_boss_state_lines(state: &RunState, boss_id: &str) -> Vec<String> {
+fn inspect_boss_state_lines(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    boss_id: &str,
+) -> Vec<String> {
     let alive = state.bosses_alive.contains(boss_id);
     let remaining_hp = state.boss_hp.get(boss_id).copied().unwrap_or(0).max(0);
     let present_here = state
@@ -1257,6 +2381,10 @@ fn inspect_boss_state_lines(state: &RunState, boss_id: &str) -> Vec<String> {
         ));
     }
 
+    if let Some(boss) = find_boss(bundle, boss_id) {
+        lines.push(sense_line(boss.can_hear, boss.can_see));
+    }
+
     if is_garage_brute_wounded_phase(boss_id, remaining_hp) {
         lines
             .push("Final phase: wounded and swinging harder than the opening exchange.".to_owned());
@@ -1270,6 +2398,14 @@ fn inspect_boss_state_lines(state: &RunState, boss_id: &str) -> Vec<String> {
     }
 
     lines
+}
+
+fn sense_line(can_hear: bool, can_see: bool) -> String {
+    format!(
+        "Senses: hearing {} | sight {}",
+        if can_hear { "yes" } else { "no" },
+        if can_see { "yes" } else { "no" }
+    )
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -1428,6 +2564,75 @@ fn summarize_event(event: &GameEvent) -> Option<String> {
             "Took {} damage and dropped to {} HP.",
             amount, remaining_hp
         )),
+        GameEvent::NoiseSpawnedEnemy {
+            enemy_id,
+            template_id,
+            location_id,
+        } => Some(format!(
+            "Noise spawned enemy '{}' from template '{}' at '{}'.",
+            enemy_id, template_id, location_id
+        )),
+        GameEvent::NoiseAttractorShifted {
+            location_id,
+            enemy_ids,
+        } => Some(format!(
+            "Noise attractor shifted to '{}' for spawned enemies: {}.",
+            location_id,
+            enemy_ids.join(", ")
+        )),
+        GameEvent::SightAttractorAcquired {
+            enemy_id,
+            subject_id,
+            location_id,
+        } => Some(format!(
+            "Spawned enemy '{}' sighted '{}' at '{}'.",
+            enemy_id, subject_id, location_id
+        )),
+        GameEvent::SightAttractorMissed {
+            enemy_id,
+            subject_id,
+            location_id,
+            detect_chance_percent,
+            roll_percent,
+        } => Some(format!(
+            "Spawned enemy '{}' missed sighting '{}' at '{}' with {}% detect chance and roll {}.",
+            enemy_id, subject_id, location_id, detect_chance_percent, roll_percent
+        )),
+        GameEvent::SightAttractorLost {
+            enemy_id,
+            subject_id,
+        } => Some(format!(
+            "Spawned enemy '{}' lost sight of '{}'.",
+            enemy_id, subject_id
+        )),
+        GameEvent::SpawnedEnemyMoved {
+            enemy_id,
+            from_location_id,
+            to_location_id,
+            target_location_id,
+        } => Some(format!(
+            "Spawned enemy '{}' moved from '{}' to '{}' toward '{}'.",
+            enemy_id, from_location_id, to_location_id, target_location_id
+        )),
+        GameEvent::SpawnedEnemyWaited {
+            enemy_id,
+            location_id,
+            reason,
+        } => Some(format!(
+            "Spawned enemy '{}' waited at '{}': {}.",
+            enemy_id, location_id, reason
+        )),
+        GameEvent::SpawnedEnemyAttackedHazard {
+            enemy_id,
+            hazard_kind,
+            location_id,
+            break_chance_percent,
+            roll_percent,
+            broken,
+        } => Some(format!(
+            "Spawned enemy '{}' attacked {:?} at '{}' with {}% break chance and rolled {}: broken={}.",
+            enemy_id, hazard_kind, location_id, break_chance_percent, roll_percent, broken
+        )),
         GameEvent::AttackWhiff => Some("Attack missed or found no target.".to_owned()),
         GameEvent::Waited { location_id } => Some(format!("Waited at '{}'.", location_id)),
         GameEvent::ObjectiveCompleted { objective_id } => {
@@ -1441,10 +2646,12 @@ fn summarize_event(event: &GameEvent) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::data::datapacks::load_datapack_bundle_by_folder;
-    use crate::game::actions::{EncounterKind, GameAction, GameEvent, ItemUseEffect};
+    use crate::game::actions::{
+        EncounterKind, GameAction, GameEvent, ItemUseEffect, MovementHazardKind,
+    };
     use crate::game::generation::generate_new_run;
 
-    use super::{ROLLING_SUMMARY_LIMIT, apply_action};
+    use super::{ROLLING_SUMMARY_LIMIT, SpawnedEnemyStep, apply_action, spawned_enemy_next_step};
 
     #[test]
     fn invalid_movement_is_blocked_by_boundary_rules() {
@@ -1949,6 +3156,12 @@ mod tests {
             inspect
                 .lines
                 .iter()
+                .any(|line| line == "Senses: hearing yes | sight yes")
+        );
+        assert!(
+            inspect
+                .lines
+                .iter()
                 .any(|line| { line.contains("this is the flank tax") })
         );
     }
@@ -1979,6 +3192,12 @@ mod tests {
                 .any(|line| line == "Threat state: active | HP remaining: 4")
         );
         assert!(inspect.lines.iter().any(|line| line == "Present here: yes"));
+        assert!(
+            inspect
+                .lines
+                .iter()
+                .any(|line| line == "Senses: hearing yes | sight yes")
+        );
         assert!(
             inspect
                 .lines
@@ -2547,7 +3766,7 @@ mod tests {
     }
 
     #[test]
-    fn loud_actions_raise_noise_and_barricaded_wait_lowers_it() {
+    fn loud_actions_raise_noise_and_successful_wait_lowers_it() {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
         let mut state = generate_new_run(&bundle).state;
@@ -2603,12 +3822,12 @@ mod tests {
                 target: "back_garden".to_owned(),
             },
         );
-        assert_eq!(state.noise_level, 2);
+        assert_eq!(state.noise_level, 1);
         assert!(
             unlock
                 .lines
                 .iter()
-                .any(|line| line == "Noise rises to Loud.")
+                .any(|line| line == "Noise rises to Stirred.")
         );
 
         apply_action(
@@ -2632,22 +3851,948 @@ mod tests {
                 target: "back_garden".to_owned(),
             },
         );
-        assert_eq!(state.noise_level, 3);
+        assert_eq!(state.noise_level, 1);
         assert!(
             barricade
                 .lines
                 .iter()
-                .any(|line| line == "Noise rises to Swarming.")
+                .any(|line| line == "Noise rises to Stirred.")
         );
 
         let calm_wait = apply_action(&mut state, &bundle, GameAction::Wait);
-        assert_eq!(state.noise_level, 2);
+        assert_eq!(state.noise_level, 0);
         assert!(
             calm_wait
                 .lines
                 .iter()
-                .any(|line| line == "Noise settles to Loud.")
+                .any(|line| line == "Noise settles to Quiet.")
         );
+    }
+
+    #[test]
+    fn successful_non_noisy_actions_reduce_noise_over_time() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.noise_level = 2;
+
+        let look = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert_eq!(state.noise_level, 1);
+        assert!(
+            look.lines
+                .iter()
+                .any(|line| line == "Noise settles to Stirred.")
+        );
+
+        let move_outcome = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "kitchen".to_owned(),
+            },
+        );
+
+        assert_eq!(state.noise_level, 0);
+        assert!(
+            move_outcome
+                .lines
+                .iter()
+                .any(|line| line == "Noise settles to Quiet.")
+        );
+    }
+
+    #[test]
+    fn rejected_non_noisy_actions_do_not_reduce_noise() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.noise_level = 2;
+
+        let blocked = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "garage".to_owned(),
+            },
+        );
+
+        assert_eq!(state.noise_level, 2);
+        assert!(
+            blocked
+                .events
+                .iter()
+                .any(|event| { matches!(event, GameEvent::MovementBlocked { .. }) })
+        );
+        assert!(
+            !blocked
+                .lines
+                .iter()
+                .any(|line| line.starts_with("Noise settles"))
+        );
+    }
+
+    #[test]
+    fn max_noise_spawns_enemy_instance_in_yard_location() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.noise_level = 2;
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Attack);
+
+        let Some(GameEvent::NoiseSpawnedEnemy {
+            enemy_id,
+            template_id,
+            location_id,
+        }) = outcome
+            .events
+            .iter()
+            .find(|event| matches!(event, GameEvent::NoiseSpawnedEnemy { .. }))
+        else {
+            panic!("expected max-noise spawn event");
+        };
+        let spawn_location = bundle
+            .locations
+            .iter()
+            .find(|location| location.id == *location_id)
+            .expect("spawned location should resolve");
+        let spawned_template = bundle
+            .enemies
+            .iter()
+            .find(|enemy| enemy.id == *template_id)
+            .expect("spawned enemy template should resolve");
+
+        assert_eq!(state.noise_level, 3);
+        assert_eq!(state.noise_spawn_count, 1);
+        assert!(enemy_id.starts_with("noise_spawn_1_"));
+        assert!(spawn_location.tags.iter().any(|tag| tag == "outdoor"));
+        assert!(state.enemies_alive.contains(enemy_id));
+        assert_eq!(state.enemy_hp.get(enemy_id), Some(&spawned_template.hp));
+        assert!(
+            state
+                .location_enemies
+                .get(location_id)
+                .is_some_and(|entries| entries.contains(enemy_id))
+        );
+        assert!(outcome.lines.iter().any(|line| {
+            line.contains("Noise peaks at Swarming") && line.contains(&spawn_location.name)
+        }));
+        assert!(!outcome.events.iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::SpawnedEnemyMoved { enemy_id: moved_id, .. }
+                    | GameEvent::SpawnedEnemyWaited {
+                        enemy_id: moved_id,
+                        ..
+                    } if moved_id == enemy_id
+            )
+        }));
+
+        let spawned_enemy_id = enemy_id.clone();
+        let spawned_template_id = template_id.clone();
+        let spawned_location_id = location_id.clone();
+        state.current_location_id = spawned_location_id;
+        let inspect = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Inspect {
+                target: spawned_template_id,
+            },
+        );
+        assert!(matches!(
+            inspect.events.first(),
+            Some(GameEvent::Inspected { target }) if target == &spawned_enemy_id
+        ));
+    }
+
+    #[test]
+    fn noise_spawn_only_fires_when_noise_crosses_into_maximum() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        state.noise_level = 3;
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Attack);
+
+        assert_eq!(state.noise_level, 3);
+        assert_eq!(state.noise_spawn_count, 0);
+        assert!(
+            !outcome
+                .events
+                .iter()
+                .any(|event| { matches!(event, GameEvent::NoiseSpawnedEnemy { .. }) })
+        );
+    }
+
+    #[test]
+    fn max_noise_does_not_spawn_enemy_when_pool_cannot_hear() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        for enemy in &mut bundle.enemies {
+            enemy.can_hear = false;
+        }
+        let mut state = generate_new_run(&bundle).state;
+        state.noise_level = 2;
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Attack);
+
+        assert_eq!(state.noise_level, 3);
+        assert_eq!(state.noise_spawn_count, 0);
+        assert!(
+            !outcome
+                .events
+                .iter()
+                .any(|event| { matches!(event, GameEvent::NoiseSpawnedEnemy { .. }) })
+        );
+    }
+
+    #[test]
+    fn existing_spawned_enemy_moves_one_legal_tile_toward_noise_source() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        state.current_location_id = "laundry".to_owned();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("back_garden".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), "front_verandah".to_owned());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(
+            !state
+                .location_enemies
+                .get("back_garden")
+                .is_some_and(|entries| entries.contains(&enemy_id))
+        );
+        assert!(
+            state
+                .location_enemies
+                .get("front_verandah")
+                .is_some_and(|entries| entries.contains(&enemy_id))
+        );
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id: moved_id,
+                from_location_id,
+                to_location_id,
+                target_location_id,
+            } if moved_id == &enemy_id
+                && from_location_id == "back_garden"
+                && to_location_id == "front_verandah"
+                && target_location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn noisy_actions_shift_existing_spawned_enemy_attractor_to_latest_source() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        state.current_location_id = "kitchen".to_owned();
+        state.noise_level = 3;
+        state.noise_spawn_count = 1;
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("back_garden".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), "front_verandah".to_owned());
+        state.spawned_enemy_searching.insert(enemy_id.clone());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Attack);
+
+        assert_eq!(
+            state
+                .spawned_enemy_targets
+                .get(&enemy_id)
+                .map(String::as_str),
+            Some("kitchen")
+        );
+        assert!(!state.spawned_enemy_searching.contains(&enemy_id));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::NoiseAttractorShifted {
+                location_id,
+                enemy_ids,
+            } if location_id == "kitchen" && enemy_ids == &vec![enemy_id.clone()]
+        )));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id: moved_id,
+                from_location_id,
+                to_location_id,
+                target_location_id,
+            } if moved_id == &enemy_id
+                && from_location_id == "back_garden"
+                && to_location_id == "front_verandah"
+                && target_location_id == "kitchen"
+        )));
+    }
+
+    #[test]
+    fn spawned_enemy_searches_after_reaching_noise_source() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        state.current_location_id = "laundry".to_owned();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("front_verandah".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), "front_verandah".to_owned());
+        state
+            .spawned_enemy_origins
+            .insert(enemy_id.clone(), "kitchen".to_owned());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(state.spawned_enemy_searching.contains(&enemy_id));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyWaited {
+                enemy_id: waited_id,
+                reason,
+                ..
+            } if waited_id == &enemy_id && reason.contains("searching")
+        ) || matches!(
+            event,
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id: moved_id,
+                from_location_id,
+                ..
+            } if moved_id == &enemy_id && from_location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn spawned_enemy_acquires_player_by_sight_and_prioritizes_visual_chase() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let mut acquired = false;
+
+        for summary_len in 0..40 {
+            let mut state = generate_new_run(&bundle).state;
+            state.current_location_id = "front_verandah".to_owned();
+            state.rolling_summary = (0..summary_len)
+                .map(|index| format!("summary {}", index))
+                .collect();
+            state.enemies_alive.insert(enemy_id.clone());
+            state.enemy_hp.insert(enemy_id.clone(), 3);
+            state
+                .location_enemies
+                .entry("kitchen".to_owned())
+                .or_default()
+                .push(enemy_id.clone());
+            state
+                .spawned_enemy_targets
+                .insert(enemy_id.clone(), "laundry".to_owned());
+            state
+                .spawned_enemy_origins
+                .insert(enemy_id.clone(), "back_garden".to_owned());
+
+            let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+            if !outcome.events.iter().any(|event| {
+                matches!(event, GameEvent::SightAttractorAcquired { enemy_id: sighting_id, .. } if sighting_id == &enemy_id)
+            }) {
+                continue;
+            }
+
+            assert_eq!(
+                state
+                    .spawned_enemy_sight_targets
+                    .get(&enemy_id)
+                    .map(String::as_str),
+                Some("front_verandah")
+            );
+            assert_eq!(
+                state
+                    .spawned_enemy_sight_subjects
+                    .get(&enemy_id)
+                    .map(String::as_str),
+                Some("player")
+            );
+            assert!(outcome.events.iter().any(|event| matches!(
+                event,
+                GameEvent::SightAttractorAcquired {
+                    enemy_id: sighting_id,
+                    subject_id,
+                    location_id,
+                } if sighting_id == &enemy_id
+                    && subject_id == "player"
+                    && location_id == "front_verandah"
+            )));
+            assert!(outcome.events.iter().any(|event| matches!(
+                event,
+                GameEvent::SpawnedEnemyMoved {
+                    enemy_id: moved_id,
+                    target_location_id,
+                    ..
+                } if moved_id == &enemy_id && target_location_id == "front_verandah"
+            ) || matches!(
+                event,
+                GameEvent::SpawnedEnemyWaited {
+                    enemy_id: waited_id,
+                    reason,
+                    ..
+                } if waited_id == &enemy_id && reason.contains("chasing player by sight")
+            )));
+            acquired = true;
+            break;
+        }
+
+        assert!(
+            acquired,
+            "expected at least one deterministic sight acquisition in searched states"
+        );
+    }
+
+    #[test]
+    fn rules_can_disable_sight_acquisition_chance() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        bundle.rules.sight_acquire_chance_percent = 0;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let mut state = generate_new_run(&bundle).state;
+        state.current_location_id = "front_verandah".to_owned();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(!state.spawned_enemy_sight_targets.contains_key(&enemy_id));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SightAttractorMissed {
+                enemy_id: missed_id,
+                detect_chance_percent: 0,
+                ..
+            } if missed_id == &enemy_id
+        )));
+    }
+
+    #[test]
+    fn rules_can_disable_sight_chase_delay() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        bundle.rules.sight_acquire_chance_percent = 100;
+        bundle.rules.sight_chase_delay_chance_percent = 0;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let mut state = generate_new_run(&bundle).state;
+        state.current_location_id = "front_verandah".to_owned();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id: moved_id,
+                target_location_id,
+                ..
+            } if moved_id == &enemy_id && target_location_id == "front_verandah"
+        )));
+        assert!(!outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyWaited {
+                enemy_id: waited_id,
+                reason,
+                ..
+            } if waited_id == &enemy_id && reason.contains("chasing player by sight")
+        )));
+    }
+
+    #[test]
+    fn player_sight_overrides_active_noise_attractor() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        bundle.rules.sight_acquire_chance_percent = 100;
+        bundle.rules.sight_chase_delay_chance_percent = 0;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let mut state = generate_new_run(&bundle).state;
+        state.current_location_id = "front_verandah".to_owned();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), "laundry".to_owned());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SightAttractorAcquired {
+                enemy_id: sighting_id,
+                subject_id,
+                location_id,
+            } if sighting_id == &enemy_id
+                && subject_id == "player"
+                && location_id == "front_verandah"
+        )));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id: moved_id,
+                to_location_id,
+                target_location_id,
+                ..
+            } if moved_id == &enemy_id
+                && to_location_id == "front_verandah"
+                && target_location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn non_player_sight_does_not_override_active_noise_attractor() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        bundle.rules.sight_acquire_chance_percent = 100;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let mut state = generate_new_run(&bundle).state;
+        state.current_location_id = "garage".to_owned();
+        state.location_enemies.clear();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .location_enemies
+            .entry("laundry".to_owned())
+            .or_default()
+            .push("crawler_in_weeds".to_owned());
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), "front_verandah".to_owned());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(!outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SightAttractorAcquired {
+                enemy_id: sighting_id,
+                subject_id,
+                ..
+            } if sighting_id == &enemy_id && subject_id == "crawler_in_weeds"
+        )));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id: moved_id,
+                target_location_id,
+                ..
+            } if moved_id == &enemy_id && target_location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn spawned_enemy_cannot_acquire_sight_when_template_cannot_see() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let shambler = bundle
+            .enemies
+            .iter_mut()
+            .find(|enemy| enemy.id == "shambler_front_gate")
+            .expect("expected shambler template");
+        shambler.can_see = false;
+        let mut state = generate_new_run(&bundle).state;
+        state.current_location_id = "front_verandah".to_owned();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .spawned_enemy_origins
+            .insert(enemy_id.clone(), "back_garden".to_owned());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(!state.spawned_enemy_sight_targets.contains_key(&enemy_id));
+        assert!(!outcome.events.iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::SightAttractorAcquired { enemy_id: sighting_id, .. }
+                    | GameEvent::SightAttractorMissed { enemy_id: sighting_id, .. }
+                    if sighting_id == &enemy_id
+            )
+        }));
+    }
+
+    #[test]
+    fn spawned_enemy_sight_check_can_fail_before_acquisition() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        let mut miss_outcome = None;
+
+        for summary_len in 0..40 {
+            let mut state = generate_new_run(&bundle).state;
+            state.current_location_id = "front_verandah".to_owned();
+            state.rolling_summary = (0..summary_len)
+                .map(|index| format!("summary {}", index))
+                .collect();
+            state.enemies_alive.insert(enemy_id.clone());
+            state.enemy_hp.insert(enemy_id.clone(), 3);
+            state
+                .location_enemies
+                .entry("kitchen".to_owned())
+                .or_default()
+                .push(enemy_id.clone());
+            state
+                .spawned_enemy_origins
+                .insert(enemy_id.clone(), "back_garden".to_owned());
+
+            let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+            if outcome.events.iter().any(|event| {
+                matches!(
+                    event,
+                    GameEvent::SightAttractorMissed {
+                        enemy_id: missed_id,
+                        subject_id,
+                        location_id,
+                        detect_chance_percent,
+                        ..
+                    } if missed_id == &enemy_id
+                        && subject_id == "player"
+                        && location_id == "front_verandah"
+                        && *detect_chance_percent == bundle.rules.sight_acquire_chance_percent
+                )
+            }) {
+                assert!(!state.spawned_enemy_sight_targets.contains_key(&enemy_id));
+                miss_outcome = Some(outcome);
+                break;
+            }
+        }
+
+        assert!(
+            miss_outcome.is_some(),
+            "expected at least one deterministic sight miss in searched states"
+        );
+    }
+
+    #[test]
+    fn delayed_sight_chase_can_be_shaken_into_search() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        state.current_location_id = "garage".to_owned();
+        state.location_enemies.clear();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(enemy_id.clone(), "laundry".to_owned());
+        state
+            .spawned_enemy_origins
+            .insert(enemy_id.clone(), "back_garden".to_owned());
+        state
+            .spawned_enemy_sight_targets
+            .insert(enemy_id.clone(), "front_verandah".to_owned());
+        state
+            .spawned_enemy_sight_subjects
+            .insert(enemy_id.clone(), "player".to_owned());
+        state.spawned_enemy_sight_delays.insert(enemy_id.clone(), 1);
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(state.spawned_enemy_searching.contains(&enemy_id));
+        assert!(!state.spawned_enemy_sight_targets.contains_key(&enemy_id));
+        assert!(!state.spawned_enemy_sight_subjects.contains_key(&enemy_id));
+        assert!(!state.spawned_enemy_sight_delays.contains_key(&enemy_id));
+        assert!(outcome.lines.iter().any(|line| line.contains("searching")));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SightAttractorLost {
+                enemy_id: lost_id,
+                subject_id,
+            } if lost_id == &enemy_id && subject_id == "player"
+        )));
+    }
+
+    #[test]
+    fn spawned_enemy_can_acquire_other_enemy_by_sight() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        state.current_location_id = "garage".to_owned();
+        state.location_enemies.clear();
+        state.enemies_alive.insert(enemy_id.clone());
+        state.enemy_hp.insert(enemy_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("kitchen".to_owned())
+            .or_default()
+            .push(enemy_id.clone());
+        state
+            .location_enemies
+            .entry("laundry".to_owned())
+            .or_default()
+            .push("crawler_in_weeds".to_owned());
+
+        let outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert_eq!(
+            state
+                .spawned_enemy_sight_targets
+                .get(&enemy_id)
+                .map(String::as_str),
+            Some("laundry")
+        );
+        assert_eq!(
+            state
+                .spawned_enemy_sight_subjects
+                .get(&enemy_id)
+                .map(String::as_str),
+            Some("crawler_in_weeds")
+        );
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SightAttractorAcquired {
+                enemy_id: sighting_id,
+                subject_id,
+                location_id,
+            } if sighting_id == &enemy_id
+                && subject_id == "crawler_in_weeds"
+                && location_id == "laundry"
+        )));
+    }
+
+    #[test]
+    fn searching_spawned_enemy_can_choose_to_return_to_origin() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        state.noise_spawn_count = 1;
+        state
+            .spawned_enemy_origins
+            .insert(enemy_id.clone(), "kitchen".to_owned());
+
+        let mut return_step = None;
+        for summary_len in 0..20 {
+            state.rolling_summary = (0..summary_len)
+                .map(|index| format!("summary {}", index))
+                .collect();
+            if let SpawnedEnemyStep::Move {
+                to_location_id,
+                step_target_location_id: Some(step_target_location_id),
+            } = spawned_enemy_next_step(
+                &state,
+                &bundle,
+                &enemy_id,
+                "front_verandah",
+                "front_verandah",
+                true,
+            ) {
+                return_step = Some((to_location_id, step_target_location_id));
+                break;
+            }
+        }
+
+        assert_eq!(
+            return_step,
+            Some(("kitchen".to_owned(), "kitchen".to_owned()))
+        );
+    }
+
+    #[test]
+    fn spawned_enemy_attacks_barricade_hazard_and_can_fail_to_break_it() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let barricade_blocked_id = "noise_spawn_1_crawler_in_weeds".to_owned();
+        state.enemies_alive.insert(barricade_blocked_id.clone());
+        state.enemy_hp.insert(barricade_blocked_id.clone(), 2);
+        state
+            .location_enemies
+            .entry("back_garden".to_owned())
+            .or_default()
+            .push(barricade_blocked_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(barricade_blocked_id.clone(), "front_verandah".to_owned());
+        state
+            .barricaded_locations
+            .insert("front_verandah".to_owned());
+
+        let barricade_outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(
+            state
+                .location_enemies
+                .get("back_garden")
+                .is_some_and(|entries| entries.contains(&barricade_blocked_id))
+        );
+        assert!(state.barricaded_locations.contains("front_verandah"));
+        assert!(barricade_outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyAttackedHazard {
+                enemy_id,
+                hazard_kind: MovementHazardKind::Barricade,
+                location_id,
+                broken: false,
+                ..
+            } if enemy_id == &barricade_blocked_id
+                && location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn rules_can_force_spawned_hazard_breaks() {
+        let mut bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        bundle.rules.spawned_hazard_break_chance_percent = 100;
+        let mut state = generate_new_run(&bundle).state;
+        let barricade_blocked_id = "noise_spawn_1_crawler_in_weeds".to_owned();
+        state.enemies_alive.insert(barricade_blocked_id.clone());
+        state.enemy_hp.insert(barricade_blocked_id.clone(), 2);
+        state
+            .location_enemies
+            .entry("back_garden".to_owned())
+            .or_default()
+            .push(barricade_blocked_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(barricade_blocked_id.clone(), "front_verandah".to_owned());
+        state
+            .barricaded_locations
+            .insert("front_verandah".to_owned());
+
+        let barricade_outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(!state.barricaded_locations.contains("front_verandah"));
+        assert!(barricade_outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyAttackedHazard {
+                enemy_id,
+                hazard_kind: MovementHazardKind::Barricade,
+                location_id,
+                break_chance_percent: 100,
+                broken: true,
+                ..
+            } if enemy_id == &barricade_blocked_id
+                && location_id == "front_verandah"
+        )));
+    }
+
+    #[test]
+    fn spawned_enemy_can_break_locked_gate_into_broken_open_state() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut state = generate_new_run(&bundle).state;
+        let locked_blocked_id = "noise_spawn_2_shambler_front_gate".to_owned();
+        state.current_location_id = "laundry".to_owned();
+        state.noise_spawn_count = 1;
+        state.enemies_alive.insert(locked_blocked_id.clone());
+        state.enemy_hp.insert(locked_blocked_id.clone(), 3);
+        state
+            .location_enemies
+            .entry("front_verandah".to_owned())
+            .or_default()
+            .push(locked_blocked_id.clone());
+        state
+            .spawned_enemy_targets
+            .insert(locked_blocked_id.clone(), "garage".to_owned());
+
+        let locked_outcome = apply_action(&mut state, &bundle, GameAction::Look);
+
+        assert!(
+            state
+                .location_enemies
+                .get("front_verandah")
+                .is_some_and(|entries| entries.contains(&locked_blocked_id))
+        );
+        assert!(locked_outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::SpawnedEnemyAttackedHazard {
+                enemy_id,
+                hazard_kind: MovementHazardKind::LockedGate,
+                location_id,
+                broken: true,
+                ..
+            } if enemy_id == &locked_blocked_id
+                && location_id == "garage"
+        )));
+        assert!(!state.locked_locations.contains("garage"));
+        assert!(state.broken_locked_locations.contains("garage"));
+
+        state.current_location_id = "front_verandah".to_owned();
+        let inspect = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Inspect {
+                target: "garage".to_owned(),
+            },
+        );
+        assert!(
+            inspect
+                .lines
+                .iter()
+                .any(|line| line.contains("Gate state: Broken"))
+        );
+
+        let moved = apply_action(
+            &mut state,
+            &bundle,
+            GameAction::Move {
+                destination: "garage".to_owned(),
+            },
+        );
+        assert_eq!(state.current_location_id, "garage");
+        assert!(moved.events.iter().any(|event| {
+            matches!(event, GameEvent::Moved { to_location_id, .. } if to_location_id == "garage")
+        }));
     }
 
     #[test]
@@ -2659,6 +4804,7 @@ mod tests {
 
         let wait = apply_action(&mut state, &bundle, GameAction::Wait);
         assert_eq!(state.hp, 8);
+        assert_eq!(state.noise_level, 1);
         assert!(wait.events.iter().any(|event| matches!(
             event,
             GameEvent::DamageTaken {
@@ -2667,6 +4813,7 @@ mod tests {
             }
         )));
 
+        state.noise_level = 2;
         let attack = apply_action(&mut state, &bundle, GameAction::Attack);
         assert!(
             attack

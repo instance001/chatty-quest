@@ -19,8 +19,9 @@ Status note:
 
 - this mechanic is implemented on the current branch
 - loud actions raise global `noise_level`
-- barricaded waiting lowers noise
+- successful non-noisy actions lower noise over time
 - high noise increases authored exposed-route pressure and retaliation
+- crossing into max noise spawns one template-backed enemy instance into an outdoor yard location
 - UI, diagnostics, save/load, and reducer tests all surface or preserve noise truth
 
 ## Why Noise Next
@@ -70,16 +71,16 @@ Recommended shape:
 
 - one global `noise_level`
 - a short list of actions that raise noise
-- one or two ways noise falls or stabilizes
+- one or two ways noise falls or stabilizes over time
 - two or three explicit gameplay consequences
 
 Avoid in the first pass:
 
 - per-room sound propagation
-- line-of-sight simulation
+- full line-of-sight simulation beyond adjacent legal map spaces
 - enemy pathfinding
 - hidden dice rolls
-- procedural swarm spawning
+- broad procedural swarm spawning
 - complex stealth states
 
 ## Runtime Shape
@@ -87,6 +88,28 @@ Avoid in the first pass:
 Recommended minimum truth:
 
 - `noise_level: i32`
+- `noise_spawn_count: u32`
+- `spawned_enemy_targets: HashMap<String, String>`
+- `spawned_enemy_origins: HashMap<String, String>`
+- `spawned_enemy_searching: HashSet<String>`
+- `spawned_enemy_sight_targets: HashMap<String, String>`
+- `spawned_enemy_sight_subjects: HashMap<String, String>`
+- `spawned_enemy_sight_delays: HashMap<String, u8>`
+
+Enemy and boss templates expose sense flags:
+
+- `can_hear: bool`
+- `can_see: bool`
+
+Both default to `true` for backward compatibility with older datapacks.
+
+Scenario rules expose tuning percentages:
+
+- `sight_acquire_chance_percent`
+- `sight_chase_delay_chance_percent`
+- `spawned_hazard_break_chance_percent`
+
+Current `Property Siege Classic` values are `70`, `35`, and `35`.
 
 Suggested first-pass range:
 
@@ -139,6 +162,7 @@ Actions that should stay quiet in the first pass:
 
 - `look`
 - `inspect`
+- `move`
 - `take`
 - `equip`
 - `use medkit`
@@ -152,17 +176,18 @@ Suggested action contributions:
 - `attack` raises noise by `1`
 - `unlock` raises noise by `1`
 - `barricade` raises noise by `1`
-- `wait` lowers noise by `1` only in a barricaded location
+- any successful non-noisy action lowers noise by `1`
+- rejected or blocked actions do not lower noise
 
 Clamp rule:
 
 - `noise_level` never goes below `0`
 - `noise_level` never goes above `3`
 
-This gives barricaded spaces a second useful role:
+This gives quieter turns a second useful role:
 
-- they are not only safer
-- they are also better places to let the run calm down
+- they advance the situation without drawing more attention
+- they let the run calm down when the player stops making loud moves
 
 ## First-Pass Consequences
 
@@ -201,6 +226,71 @@ The point is not to punish every action.
 
 The point is to make loud play visibly cost something.
 
+### 4. Max-Noise Spawn
+
+When a loud action raises noise into `Swarming`, the reducer spawns one runtime enemy instance.
+
+Current first reading:
+
+- choose an enemy template from the scenario enemy pool
+- only templates with `can_hear = true` are eligible for noise spawning
+- choose a yard location from locations tagged `outdoor`, with `yard` or `garden` id fallbacks
+- create a runtime enemy id such as `noise_spawn_1_shambler_front_gate`
+- copy HP and combat/media/narrator identity from the selected enemy template
+- add the instance to `enemies_alive`, `enemy_hp`, and the selected `location_enemies` bucket
+- remember the map location where noise crossed into `Swarming` as the spawned instance target
+- remember the spawned instance's first placed location as its origin
+
+The selection is deterministic from run state and spawn count. It should feel like a random pool pull to the player, while staying replayable for tests, saves, and future handoff traces.
+
+### 5. Spawned-Enemy Movement
+
+Existing spawned enemies get a simple reducer-owned turn after successful player actions.
+
+Current first reading:
+
+- a newly spawned enemy does not move on the same action that created it
+- on later successful turns, it may wait or move one connected map tile
+- for `Property Siege Classic`, spawned enemies path toward the latest successful noisy action location
+- the first target is the location where the player made noise reach `Swarming`
+- later successful noisy actions shift existing spawned-enemy targets to the new source, even if noise is already capped
+- spawned enemies whose source template has `can_hear = false` do not acquire new noise attractors
+- when a spawned enemy reaches its current target, it enters search mode instead of endlessly treating the reached tile as fresh noise
+- search mode can wait, move one legal adjacent tile, or move back toward the spawned enemy's origin when no new attractor has appeared
+- search and lost-trail lines use deterministic flavor variants so repeated ticks do not all read identically
+- a new successful noisy action clears search mode for affected spawned enemies and retargets them to the new source
+- spawned enemies can acquire a sight attractor when the player is in the same tile or an adjacent legally visible tile
+- spawned enemies whose source template has `can_see = false` cannot acquire sight attractors
+- spawned enemies can acquire another live enemy or boss by sight when they are searching or otherwise not committed to an active noise target
+- sight acquisition has a deterministic success chance once a valid sightline exists, tuned by `rules.toml`
+- a failed sight acquisition emits a structured miss event and does not create a sight target
+- if an existing visual chase fails its sight check, the chaser emits a structured lost-sight event and drops into the shared search loop
+- player sight takes priority over noise; non-player sight does not override an active noise chase
+- sight chases have a deterministic chance to take an extra tick before moving, tuned by `rules.toml`
+- if visual contact is broken during that delayed chase window, the chaser drops into the shared search loop
+- for broader datapacks, the fallback behavior chooses a deterministic legal adjacent tile
+- locked destination locations block movement
+- barricaded current or destination locations block movement
+- when the next route blocker is a barricade or locked gate, the spawned enemy attacks that hazard with a deterministic break chance tuned by `rules.toml`
+- a broken barricade is removed from `barricaded_locations`
+- a broken locked gate is removed from `locked_locations` and added to `broken_locked_locations`
+- blocked or rejected player actions do not advance spawned enemies
+
+This is not full AI. It is a small map-pressure behavior that proves runtime instances can move without bypassing authored gates.
+
+### Spawned-Enemy Attractor Priority
+
+Spawned enemies resolve their current attractor in one deterministic order.
+
+| Priority | Attractor | Gated by | Notes |
+| --- | --- | --- | --- |
+| 1 | Player sight | `can_see`, legal sightline, sight acquisition roll | Overrides an active noise target when acquired. |
+| 2 | Active sight track | Existing `spawned_enemy_sight_targets` state | Can be delayed by the sight chase delay rule; lost or failed sight drops into search. |
+| 3 | Noise target | `can_hear`, `spawned_enemy_targets` state | Fresh successful noisy actions can retarget hearing-capable spawned enemies. |
+| 4 | Search fallback | Search state and origin state | Waits, wanders, or returns toward origin when no stronger attractor is active. |
+
+Non-player sight is deliberately weaker than player sight. A spawned enemy can acquire another live enemy or boss by sight only when it is searching or not already committed to an active noise target.
+
 ## UI Truth Surfacing
 
 Noise must be visible outside narration.
@@ -215,6 +305,8 @@ Recommended presentation:
 
 - show `Noise: Quiet / Stirred / Loud / Swarming`
 - show the numeric level in diagnostics
+- surface template senses on enemy and boss inspect output
+- surface active spawned-enemy attractors in sidebar and diagnostics
 - include small helper text such as:
   - `Barricaded spaces help noise settle.`
 
@@ -251,7 +343,8 @@ Noise should reinforce the barricade system rather than replace it.
 
 Recommended interaction:
 
-- barricaded rooms are better places to wait and let noise settle
+- wait and other successful non-noisy actions let noise settle
+- barricaded rooms remain better places to wait because they reduce or avoid authored pressure
 - exposed rooms become more punishing at high noise
 
 This creates a clear tactical contrast:
@@ -266,6 +359,14 @@ Noise state must round-trip through save/load.
 Required behavior:
 
 - `noise_level` restores exactly
+- `noise_spawn_count` restores exactly
+- `spawned_enemy_targets` restores exactly
+- `spawned_enemy_origins` restores exactly
+- `spawned_enemy_searching` restores exactly
+- `spawned_enemy_sight_targets` restores exactly
+- `spawned_enemy_sight_subjects` restores exactly
+- `spawned_enemy_sight_delays` restores exactly
+- broken-open gate state restores exactly
 - restored noise continues to affect subsequent reducer outcomes correctly
 
 ## Test Coverage
@@ -275,7 +376,21 @@ Minimum automated coverage:
 - generated run starts at `noise_level = 0`
 - loud actions raise noise deterministically
 - noise clamps at the defined maximum
-- quiet recovery in a barricaded space lowers noise deterministically
+- crossing into max noise spawns a template-backed enemy instance in an outdoor yard location
+- already-max noise does not spawn another enemy unless noise first drops and then reaches max again
+- existing spawned enemies can move one legal tile toward their stored noise source
+- successful noisy actions retarget existing spawned enemies to the latest noise source
+- spawned enemies enter search mode after reaching the current attractor
+- searching spawned enemies can choose to return toward their origin
+- spawned enemies can acquire the player by sight and chase that visual attractor
+- spawned enemies can acquire another live encounter by sight when not actively chasing noise
+- spawned enemy sight acquisition can fail before creating a sight target
+- delayed sight chases can be shaken into search when the target is no longer visible
+- barricades and locked destinations can make spawned enemies wait
+- spawned enemies can attack blocking barricades or locked gates and sometimes break them
+- broken locked gates are surfaced separately from normally unlocked gates
+- quiet recovery through successful non-noisy actions lowers noise deterministically
+- rejected or blocked actions do not lower noise
 - passive pressure scales correctly at higher noise where authored
 - save/load preserves `noise_level`
 - diagnostics or derived models show the current noise truth
@@ -287,7 +402,7 @@ Do not include these in the first noise pass:
 - stealth takedowns
 - hearing-radius simulation
 - free-roaming horde entities
-- random encounter spawning
+- broad random encounter systems beyond the max-noise yard spawn
 - per-room audio graphs
 - NPC hearing logic
 - procedural swarm AI

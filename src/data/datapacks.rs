@@ -8,6 +8,22 @@ use crate::app_paths;
 const DATAPACKS_ROOT: &str = "assets/datapacks";
 const DATAPACK_SCHEMA_VERSION: &str = "v0.1-toml-templates-2";
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_sight_acquire_chance_percent() -> u8 {
+    70
+}
+
+fn default_sight_chase_delay_chance_percent() -> u8 {
+    35
+}
+
+fn default_spawned_hazard_break_chance_percent() -> u8 {
+    35
+}
+
 #[derive(Clone, Debug)]
 pub struct DatapackSummary {
     pub id: String,
@@ -24,6 +40,7 @@ pub struct DatapackSummary {
     pub objective_count: usize,
     pub narrator_brief_count: usize,
     pub media_reference_count: usize,
+    pub sensory_template_count: usize,
     pub dm_style_preview: Option<String>,
     pub world_tone_preview: Option<String>,
 }
@@ -95,6 +112,12 @@ pub struct RulesToml {
     pub boundary_response: Option<String>,
     pub objective_mode: String,
     pub chaos_mode_note: Option<String>,
+    #[serde(default = "default_sight_acquire_chance_percent")]
+    pub sight_acquire_chance_percent: u8,
+    #[serde(default = "default_sight_chase_delay_chance_percent")]
+    pub sight_chase_delay_chance_percent: u8,
+    #[serde(default = "default_spawned_hazard_break_chance_percent")]
+    pub spawned_hazard_break_chance_percent: u8,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -162,6 +185,10 @@ pub struct EnemyTemplate {
     pub description: String,
     pub narrator_brief: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default = "default_true")]
+    pub can_hear: bool,
+    #[serde(default = "default_true")]
+    pub can_see: bool,
     #[serde(default)]
     pub media: MediaReferences,
     pub hp: i32,
@@ -175,6 +202,10 @@ pub struct BossTemplate {
     pub description: String,
     pub narrator_brief: Option<String>,
     pub tags: Vec<String>,
+    #[serde(default = "default_true")]
+    pub can_hear: bool,
+    #[serde(default = "default_true")]
+    pub can_see: bool,
     #[serde(default)]
     pub media: MediaReferences,
     pub hp: i32,
@@ -380,6 +411,22 @@ fn load_datapack_bundle_from_path(
         {
             errors.push("rules.toml chaos_mode_note must not be blank when present.".to_owned());
         }
+
+        validate_percent(
+            "rules.toml sight_acquire_chance_percent",
+            rules.sight_acquire_chance_percent,
+            &mut errors,
+        );
+        validate_percent(
+            "rules.toml sight_chase_delay_chance_percent",
+            rules.sight_chase_delay_chance_percent,
+            &mut errors,
+        );
+        validate_percent(
+            "rules.toml spawned_hazard_break_chance_percent",
+            rules.spawned_hazard_break_chance_percent,
+            &mut errors,
+        );
     }
 
     if let Some(locations) = &locations {
@@ -787,6 +834,16 @@ fn bundle_to_summary(bundle: &DatapackBundle) -> DatapackSummary {
                 .iter()
                 .map(|entry| count_media_references(&entry.media))
                 .sum::<usize>(),
+        sensory_template_count: bundle
+            .enemies
+            .iter()
+            .filter(|entry| entry.can_hear || entry.can_see)
+            .count()
+            + bundle
+                .bosses
+                .iter()
+                .filter(|entry| entry.can_hear || entry.can_see)
+                .count(),
         dm_style_preview: bundle.dm_style.clone(),
         world_tone_preview: bundle.world_tone.clone(),
     }
@@ -909,6 +966,12 @@ fn validate_non_blank_names<T: HasTemplateIdentity>(
                 entry.id()
             ));
         }
+    }
+}
+
+fn validate_percent(label: &str, value: u8, errors: &mut Vec<String>) {
+    if value > 100 {
+        errors.push(format!("{} must be between 0 and 100.", label));
     }
 }
 
@@ -1056,6 +1119,7 @@ damage = 1
         assert_eq!(record.summary.enemy_count, 2);
         assert_eq!(record.summary.boss_count, 1);
         assert_eq!(record.summary.objective_count, 1);
+        assert_eq!(record.summary.sensory_template_count, 3);
     }
 
     #[test]
@@ -1065,6 +1129,9 @@ damage = 1
 
         assert_eq!(bundle.pack.id, "property_siege_classic");
         assert_eq!(bundle.rules.starting_location, "front_verandah");
+        assert_eq!(bundle.rules.sight_acquire_chance_percent, 70);
+        assert_eq!(bundle.rules.sight_chase_delay_chance_percent, 35);
+        assert_eq!(bundle.rules.spawned_hazard_break_chance_percent, 35);
         assert!(
             bundle
                 .locations
@@ -1073,6 +1140,13 @@ damage = 1
         );
         assert!(bundle.items.iter().any(|item| item.id == "cricket_bat"));
         assert!(bundle.items.iter().any(|item| item.id == "barricade_kit"));
+        let shambler = bundle
+            .enemies
+            .iter()
+            .find(|enemy| enemy.id == "shambler_front_gate")
+            .expect("expected shambler template");
+        assert!(shambler.can_hear);
+        assert!(shambler.can_see);
         assert_eq!(
             bundle
                 .items
@@ -1081,12 +1155,13 @@ damage = 1
                 .and_then(|item| item.utility_effect.as_deref()),
             Some("reveal_connections")
         );
-        assert!(
-            bundle
-                .bosses
-                .iter()
-                .any(|boss| boss.id == "brute_in_garage")
-        );
+        let garage_brute = bundle
+            .bosses
+            .iter()
+            .find(|boss| boss.id == "brute_in_garage")
+            .expect("expected garage brute template");
+        assert!(garage_brute.can_hear);
+        assert!(garage_brute.can_see);
         assert_eq!(
             bundle.objectives[0].target_boss_id.as_deref(),
             Some("brute_in_garage")

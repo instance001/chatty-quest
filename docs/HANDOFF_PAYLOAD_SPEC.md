@@ -348,6 +348,7 @@ Examples:
 
 - known location count
 - visited location count
+- locked, broken-open, and barricaded location ids when relevant
 - maybe current local threats
 
 It should not try to become a full UI map dump by default.
@@ -358,6 +359,10 @@ Should include:
 
 - local live enemies
 - local live bosses
+- spawned enemy target locations when runtime instances are active
+- spawned enemy origin locations when runtime instances are active
+- spawned enemy search-mode ids when runtime instances have reached an attractor
+- spawned enemy sight targets, sight subjects, and delayed sight-chase ids when runtime instances are tracking visual attractors
 - maybe recently defeated encounter ids if packet intent requires it
 
 ### `inventory_state`

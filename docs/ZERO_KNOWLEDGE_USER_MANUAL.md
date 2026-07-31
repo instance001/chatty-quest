@@ -303,6 +303,8 @@ You will not be able to go everywhere immediately.
 
 Part of the scenario is opening the map through ordinary play.
 
+Some locked routes can also become `broken` if scenario pressure forces them open. Broken routes are passable, but the UI keeps the different status visible so you can tell they were not opened normally.
+
 ### 2. Some Spaces Can Be Secured
 
 Certain dangerous routes can be made safer.
@@ -335,7 +337,7 @@ To finish cleanly, you may need a combination of:
 2. Read the left panel before taking risky actions.
 3. Pick up useful items unless you have a reason not to.
 4. Do not treat all routes as equally safe.
-5. Do not ignore noise.
+5. Do not ignore noise, especially once it reaches its maximum.
 6. Inspect threats if you want a better read before committing.
 7. Use the `Character` tab when the log feels too busy.
 

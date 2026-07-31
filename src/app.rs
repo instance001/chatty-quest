@@ -231,6 +231,7 @@ impl ChattyQuestApp {
                     objective_count: record.summary.objective_count,
                     narrator_brief_count: record.summary.narrator_brief_count,
                     media_reference_count: record.summary.media_reference_count,
+                    sensory_template_count: record.summary.sensory_template_count,
                     boundary_response: record.summary.boundary_response.clone(),
                     dm_style_preview: record.summary.dm_style_preview.clone(),
                     world_tone_preview: record.summary.world_tone_preview.clone(),

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::data::datapacks::DatapackBundle;
 use crate::diagnostics::DiagnosticReport;
 use crate::game::derived::{
-    ObjectiveConditionRowStyle, objective_condition_rows, run_phase_label, security_summary_rows,
-    utility_relevance_rows,
+    ObjectiveConditionRowStyle, attractor_summary_rows, objective_condition_rows, run_phase_label,
+    security_summary_rows, utility_relevance_rows,
 };
 use crate::game::{RunState, location_description_for_state};
 use crate::media::{MediaPanelState, resolve_location_tile_image, resolve_primary_image};
@@ -42,9 +42,11 @@ pub struct CharacterSummaryModel {
     pub objective_condition_rows: Vec<String>,
     pub utility_relevance_rows: Vec<String>,
     pub security_summary_rows: Vec<String>,
+    pub attractor_summary_rows: Vec<String>,
     pub enemies_defeated: usize,
     pub bosses_defeated: usize,
     pub locked_locations: Vec<String>,
+    pub broken_locked_locations: Vec<String>,
     pub barricaded_locations: Vec<String>,
     pub rolling_summary: Vec<String>,
     pub pack_folder: Option<String>,
@@ -65,6 +67,7 @@ pub struct ExitRowModel {
     pub destination_id: String,
     pub destination_name: String,
     pub locked: bool,
+    pub broken: bool,
     pub barricaded: bool,
     pub route_note: Option<String>,
     pub threat_forecast: Option<String>,
@@ -82,6 +85,7 @@ pub struct KnownLocationRowModel {
     pub location_name: String,
     pub marker: String,
     pub locked: bool,
+    pub broken: bool,
     pub barricaded: bool,
 }
 
@@ -239,6 +243,7 @@ pub struct MapExitButtonModel {
     pub destination_id: String,
     pub destination_name: String,
     pub locked: bool,
+    pub broken: bool,
     pub barricaded: bool,
 }
 
@@ -256,6 +261,7 @@ pub struct MapTileDisplayModel {
     pub show_threat_badge: bool,
     pub show_objective_badge: bool,
     pub show_locked_badge: bool,
+    pub show_broken_badge: bool,
     pub show_barricaded_badge: bool,
     pub show_move_button: bool,
     pub show_advance_button: bool,
@@ -389,12 +395,22 @@ pub fn build_character_summary(
         ),
         utility_relevance_rows: utility_relevance_rows(run, bundle),
         security_summary_rows: security_summary_rows(run, bundle),
+        attractor_summary_rows: attractor_summary_rows(run, bundle),
         enemies_defeated: run.enemies_defeated.len(),
         bosses_defeated: run.bosses_defeated.len(),
         locked_locations: {
             let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
             locked.sort();
             locked
+        },
+        broken_locked_locations: {
+            let mut broken = run
+                .broken_locked_locations
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            broken.sort();
+            broken
         },
         barricaded_locations: {
             let mut barricaded = run.barricaded_locations.iter().cloned().collect::<Vec<_>>();
@@ -444,6 +460,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
                     destination_id: destination.id.clone(),
                     destination_name: destination.name.clone(),
                     locked: run.locked_locations.contains(&destination.id),
+                    broken: run.broken_locked_locations.contains(&destination.id),
                     barricaded: run.barricaded_locations.contains(&destination.id),
                     route_note: route_note_for_location(destination),
                     threat_forecast: threat_forecast_for_location(run, destination),
@@ -478,6 +495,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
                 location_name: location.name.clone(),
                 marker: marker.to_owned(),
                 locked: run.locked_locations.contains(&location.id),
+                broken: run.broken_locked_locations.contains(&location.id),
                 barricaded: run.barricaded_locations.contains(&location.id),
             }
         })
@@ -513,6 +531,7 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
     if let Some(threat_forecast) = threat_forecast_for_location(run, current_location) {
         current_location_status_lines.push(format!("Threat forecast: {}", threat_forecast));
     }
+    current_location_status_lines.extend(attractor_summary_rows(run, Some(bundle)));
     if run.active_objective.required_location_id.as_deref() == Some(current_location.id.as_str())
         && !run.active_objective.completed
     {
@@ -711,6 +730,14 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
                 }
             ),
             format!(
+                "Broken gates: {}",
+                if run.broken_locked_locations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    run.broken_locked_locations.join(", ")
+                }
+            ),
+            format!(
                 "Barricaded locations: {}",
                 if run.barricaded_locations.is_empty() {
                     "none".to_owned()
@@ -722,6 +749,7 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
         rows.extend(run.objective_condition_rows.iter().cloned());
         rows.extend(run.utility_relevance_rows.iter().cloned());
         rows.extend(run.security_summary_rows.iter().cloned());
+        rows.extend(run.attractor_summary_rows.iter().cloned());
         rows
     });
 
@@ -941,6 +969,10 @@ pub fn build_map_legend() -> MapLegendModel {
             MapLegendBadgeModel {
                 label: "Locked".to_owned(),
                 description: "gated progression".to_owned(),
+            },
+            MapLegendBadgeModel {
+                label: "Broken".to_owned(),
+                description: "forced open gate".to_owned(),
             },
             MapLegendBadgeModel {
                 label: "Barricaded".to_owned(),
@@ -1270,6 +1302,7 @@ pub fn build_map_exit_buttons(
             destination_id: tile.location_id.clone(),
             destination_name: tile.name.clone(),
             locked: run.locked_locations.contains(&tile.location_id),
+            broken: run.broken_locked_locations.contains(&tile.location_id),
             barricaded: run.barricaded_locations.contains(&tile.location_id),
         })
         .collect::<Vec<_>>();
@@ -1331,6 +1364,8 @@ pub fn build_map_tile_display(
         show_threat_badge: is_fully_visible && tile.has_live_threats,
         show_objective_badge: is_fully_visible && tile.has_objective_target,
         show_locked_badge: is_fully_visible && run.locked_locations.contains(&tile.location_id),
+        show_broken_badge: is_fully_visible
+            && run.broken_locked_locations.contains(&tile.location_id),
         show_barricaded_badge: is_fully_visible
             && run.barricaded_locations.contains(&tile.location_id),
         show_move_button: is_adjacent_exit,
@@ -1367,6 +1402,9 @@ pub fn build_map_tile_hover(
         }
         if display.show_locked_badge {
             detail_rows.push("Locked".to_owned());
+        }
+        if display.show_broken_badge {
+            detail_rows.push("Broken open".to_owned());
         }
         if display.show_barricaded_badge {
             detail_rows.push("Barricaded".to_owned());
@@ -1999,6 +2037,11 @@ mod tests {
             damage: 0,
         });
         run.barricaded_locations.insert("front_verandah".to_owned());
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        run.enemies_alive.insert(enemy_id.clone());
+        run.enemy_hp.insert(enemy_id.clone(), 3);
+        run.spawned_enemy_targets
+            .insert(enemy_id, "garage".to_owned());
 
         let summary = build_character_summary(&run, Some(&bundle));
 
@@ -2024,6 +2067,12 @@ mod tests {
             summary.security_summary_rows.iter().any(|row| {
                 row == "Noise recovery: waiting in a barricaded room can lower noise."
             })
+        );
+        assert!(
+            summary
+                .attractor_summary_rows
+                .iter()
+                .any(|row| row.contains("tracking noise toward Garage (garage)"))
         );
     }
 
@@ -2076,6 +2125,31 @@ mod tests {
         assert!(sidebar.current_location_status_lines.iter().any(|line| {
             line.contains("both siege lanes are secured; brute retaliation is reduced")
         }));
+    }
+
+    #[test]
+    fn sidebar_surfaces_spawned_enemy_active_attractor() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
+        run.enemies_alive.insert(enemy_id.clone());
+        run.enemy_hp.insert(enemy_id.clone(), 3);
+        run.spawned_enemy_targets
+            .insert(enemy_id.clone(), "garage".to_owned());
+        run.location_enemies
+            .entry("front_verandah".to_owned())
+            .or_default()
+            .push(enemy_id);
+
+        let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
+
+        assert!(
+            sidebar
+                .current_location_status_lines
+                .iter()
+                .any(|line| line.contains("tracking noise toward Garage (garage)"))
+        );
     }
 
     #[test]

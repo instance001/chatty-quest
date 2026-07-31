@@ -21,6 +21,12 @@ pub enum EncounterKind {
     Boss,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum MovementHazardKind {
+    Barricade,
+    LockedGate,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ItemUseEffect {
@@ -76,6 +82,50 @@ pub enum GameEvent {
     DamageTaken {
         amount: i32,
         remaining_hp: i32,
+    },
+    NoiseSpawnedEnemy {
+        enemy_id: String,
+        template_id: String,
+        location_id: String,
+    },
+    NoiseAttractorShifted {
+        location_id: String,
+        enemy_ids: Vec<String>,
+    },
+    SightAttractorAcquired {
+        enemy_id: String,
+        subject_id: String,
+        location_id: String,
+    },
+    SightAttractorMissed {
+        enemy_id: String,
+        subject_id: String,
+        location_id: String,
+        detect_chance_percent: u8,
+        roll_percent: u8,
+    },
+    SightAttractorLost {
+        enemy_id: String,
+        subject_id: String,
+    },
+    SpawnedEnemyMoved {
+        enemy_id: String,
+        from_location_id: String,
+        to_location_id: String,
+        target_location_id: String,
+    },
+    SpawnedEnemyWaited {
+        enemy_id: String,
+        location_id: String,
+        reason: String,
+    },
+    SpawnedEnemyAttackedHazard {
+        enemy_id: String,
+        hazard_kind: MovementHazardKind,
+        location_id: String,
+        break_chance_percent: u8,
+        roll_percent: u8,
+        broken: bool,
     },
     AttackWhiff,
     Waited {

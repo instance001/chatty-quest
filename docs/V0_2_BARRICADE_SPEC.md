@@ -70,7 +70,7 @@ Avoid in the first pass:
 
 - freeform crafting
 - resource stacks
-- barricade durability
+- multi-hit barricade durability
 - repair loops
 - turn-by-turn zombie breaching simulation
 - generic construction systems
@@ -333,6 +333,7 @@ Minimum automated coverage:
 - barricading an already barricaded target fails cleanly
 - save/load preserves barricade state
 - UI-derived or diagnostics-facing data shows barricade truth
+- spawned enemies can attack a blocking barricade with a small deterministic chance to destroy it
 
 ## Explicit Non-Goals
 
@@ -340,7 +341,7 @@ Do not include these in the first barricade pass:
 
 - fully simulated zombie pathfinding
 - dynamic breach countdowns
-- barricade HP
+- multi-hit barricade HP
 - repairable damage states
 - material collection economy
 - procedural fortification placement
@@ -364,6 +365,7 @@ Current branch reality:
 
 - two authored siege lanes exist
 - both lanes have distinct local payoffs
+- spawned enemies can now break a barricade in one deterministic hazard-attack event
 - securing both lanes has a small deterministic garage-finale payoff
 - UI, diagnostics, save/load, and reducer coverage all surface or preserve barricade truth
 

@@ -3,7 +3,7 @@ use crate::data::datapacks::{
     resolve_media_assets,
 };
 use crate::game::actions::EncounterKind;
-use crate::game::{GameEvent, RunState};
+use crate::game::{GameEvent, RunState, enemy_template_id, find_enemy};
 
 const DATAPACK_IMAGE_FALLBACK_CANDIDATES: &[&str] = &[
     "media/images/fallbacks/placeholder.png",
@@ -193,7 +193,7 @@ fn select_media_focus(
                         item.media.display_role.as_deref().unwrap_or("item"),
                     ));
                 }
-                if let Some(enemy) = bundle.enemies.iter().find(|it| it.id == *target) {
+                if let Some(enemy) = find_enemy(bundle, target) {
                     return Some(media_selection_for_focus_event(
                         bundle,
                         current_location,
@@ -225,7 +225,7 @@ fn select_media_focus(
                 ..
             } => match target_kind {
                 EncounterKind::Enemy => {
-                    if let Some(enemy) = bundle.enemies.iter().find(|it| it.id == *target_id) {
+                    if let Some(enemy) = find_enemy(bundle, target_id) {
                         let beat = if *defeated {
                             "Defeat focus"
                         } else {
@@ -263,6 +263,123 @@ fn select_media_focus(
                     }
                 }
             },
+            GameEvent::NoiseSpawnedEnemy {
+                template_id,
+                location_id,
+                ..
+            } => {
+                if let Some(enemy) = find_enemy(bundle, template_id) {
+                    let location = bundle.locations.iter().find(|it| it.id == *location_id);
+                    return Some(media_selection_for_focus_event(
+                        bundle,
+                        location.or(current_location),
+                        format!("Noise spawn: {}", enemy.name),
+                        enemy.description.clone(),
+                        enemy.narrator_brief.clone(),
+                        &enemy.id,
+                        &enemy.media,
+                        enemy.media.display_role.as_deref().unwrap_or("enemy"),
+                    ));
+                }
+            }
+            GameEvent::NoiseAttractorShifted { location_id, .. } => {
+                if let Some(location) = bundle.locations.iter().find(|it| it.id == *location_id) {
+                    return Some(media_selection_for_location_event(
+                        bundle,
+                        run,
+                        location,
+                        "Noise attractor",
+                    ));
+                }
+            }
+            GameEvent::SightAttractorAcquired {
+                enemy_id,
+                location_id,
+                ..
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    let location = bundle.locations.iter().find(|it| it.id == *location_id);
+                    return Some(media_selection_for_focus_event(
+                        bundle,
+                        location.or(current_location),
+                        format!("Sight chase: {}", enemy.name),
+                        enemy.description.clone(),
+                        enemy.narrator_brief.clone(),
+                        &enemy.id,
+                        &enemy.media,
+                        enemy.media.display_role.as_deref().unwrap_or("enemy"),
+                    ));
+                }
+            }
+            GameEvent::SightAttractorMissed {
+                enemy_id,
+                location_id,
+                ..
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    let location = bundle.locations.iter().find(|it| it.id == *location_id);
+                    return Some(media_selection_for_focus_event(
+                        bundle,
+                        location.or(current_location),
+                        format!("Sight miss: {}", enemy.name),
+                        enemy.description.clone(),
+                        enemy.narrator_brief.clone(),
+                        &enemy.id,
+                        &enemy.media,
+                        enemy.media.display_role.as_deref().unwrap_or("enemy"),
+                    ));
+                }
+            }
+            GameEvent::SightAttractorLost { enemy_id, .. } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    let location = run
+                        .location_enemies
+                        .iter()
+                        .find(|(_, enemy_ids)| enemy_ids.iter().any(|entry| entry == enemy_id))
+                        .and_then(|(location_id, _)| {
+                            bundle.locations.iter().find(|it| it.id == *location_id)
+                        });
+                    return Some(media_selection_for_focus_event(
+                        bundle,
+                        location.or(current_location),
+                        format!("Sight lost: {}", enemy.name),
+                        enemy.description.clone(),
+                        enemy.narrator_brief.clone(),
+                        &enemy.id,
+                        &enemy.media,
+                        enemy.media.display_role.as_deref().unwrap_or("enemy"),
+                    ));
+                }
+            }
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id,
+                to_location_id,
+                ..
+            }
+            | GameEvent::SpawnedEnemyWaited {
+                enemy_id,
+                location_id: to_location_id,
+                ..
+            }
+            | GameEvent::SpawnedEnemyAttackedHazard {
+                enemy_id,
+                location_id: to_location_id,
+                ..
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    let location = bundle.locations.iter().find(|it| it.id == *to_location_id);
+                    return Some(media_selection_for_focus_event(
+                        bundle,
+                        location.or(current_location),
+                        format!("Spawned threat: {}", enemy.name),
+                        enemy.description.clone(),
+                        enemy.narrator_brief.clone(),
+                        &enemy.id,
+                        &enemy.media,
+                        enemy.media.display_role.as_deref().unwrap_or("enemy"),
+                    ));
+                }
+            }
             GameEvent::Waited { location_id } => {
                 if let Some(location) = bundle.locations.iter().find(|it| it.id == *location_id) {
                     return Some(media_selection_for_location_event(
@@ -479,6 +596,134 @@ fn build_active_cues(
                     ),
                 });
             }
+            GameEvent::NoiseSpawnedEnemy {
+                template_id,
+                location_id,
+                ..
+            } => {
+                let location_name = bundle
+                    .locations
+                    .iter()
+                    .find(|location| location.id == *location_id)
+                    .map(|location| location.name.clone())
+                    .unwrap_or_else(|| location_id.clone());
+                if let Some(enemy) = find_enemy(bundle, template_id) {
+                    cues.push(MediaCue {
+                        label: format!("Noise spawn: {}", enemy.name),
+                        detail: format!(
+                            "Swarming noise pulled this threat into {}.",
+                            location_name
+                        ),
+                    });
+                }
+            }
+            GameEvent::NoiseAttractorShifted {
+                location_id,
+                enemy_ids,
+            } => {
+                let location_name = bundle
+                    .locations
+                    .iter()
+                    .find(|location| location.id == *location_id)
+                    .map(|location| location.name.clone())
+                    .unwrap_or_else(|| location_id.clone());
+                cues.push(MediaCue {
+                    label: format!("Noise attractor: {}", location_name),
+                    detail: format!(
+                        "{} spawned threat(s) turn toward the latest noisy location.",
+                        enemy_ids.len()
+                    ),
+                });
+            }
+            GameEvent::SightAttractorAcquired {
+                enemy_id,
+                subject_id,
+                location_id,
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    cues.push(MediaCue {
+                        label: format!("Sight chase: {}", enemy.name),
+                        detail: format!(
+                            "Sighted '{}' at '{}' and started tracking by vision.",
+                            subject_id, location_id
+                        ),
+                    });
+                }
+            }
+            GameEvent::SightAttractorMissed {
+                enemy_id,
+                subject_id,
+                location_id,
+                detect_chance_percent,
+                roll_percent,
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    cues.push(MediaCue {
+                        label: format!("Sight miss: {}", enemy.name),
+                        detail: format!(
+                            "Had a sightline to '{}' at '{}', but rolled {} against {}%.",
+                            subject_id, location_id, roll_percent, detect_chance_percent
+                        ),
+                    });
+                }
+            }
+            GameEvent::SightAttractorLost {
+                enemy_id,
+                subject_id,
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    cues.push(MediaCue {
+                        label: format!("Sight lost: {}", enemy.name),
+                        detail: format!("Lost visual track of '{}'.", subject_id),
+                    });
+                }
+            }
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id,
+                from_location_id,
+                to_location_id,
+                target_location_id,
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    cues.push(MediaCue {
+                        label: format!("Spawned threat moves: {}", enemy.name),
+                        detail: format!(
+                            "Moved from '{}' to '{}' while tracking '{}'.",
+                            from_location_id, to_location_id, target_location_id
+                        ),
+                    });
+                }
+            }
+            GameEvent::SpawnedEnemyWaited {
+                enemy_id,
+                location_id,
+                reason,
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    cues.push(MediaCue {
+                        label: format!("Spawned threat waits: {}", enemy.name),
+                        detail: format!("Held at '{}': {}.", location_id, reason),
+                    });
+                }
+            }
+            GameEvent::SpawnedEnemyAttackedHazard {
+                enemy_id,
+                hazard_kind,
+                location_id,
+                break_chance_percent,
+                roll_percent,
+                broken,
+            } => {
+                if let Some(enemy) = find_enemy(bundle, enemy_id) {
+                    cues.push(MediaCue {
+                        label: format!("Spawned threat attacks hazard: {}", enemy.name),
+                        detail: format!(
+                            "Attacked {:?} at '{}'. Break chance {}%, roll {}, broken: {}.",
+                            hazard_kind, location_id, break_chance_percent, roll_percent, broken
+                        ),
+                    });
+                }
+            }
             GameEvent::HelpShown | GameEvent::AttackWhiff => {}
         }
     }
@@ -558,6 +803,86 @@ fn build_future_hook_keys(
                 }
             }
             GameEvent::DamageTaken { .. } => keys.push("event:player_damaged".to_owned()),
+            GameEvent::NoiseSpawnedEnemy {
+                enemy_id,
+                template_id,
+                location_id,
+            } => {
+                keys.push(format!("event:noise_spawn:{}", enemy_id));
+                keys.push(format!("event:noise_spawn_template:{}", template_id));
+                keys.push(format!("event:noise_spawn_location:{}", location_id));
+            }
+            GameEvent::NoiseAttractorShifted {
+                location_id,
+                enemy_ids,
+            } => {
+                keys.push(format!("event:noise_attractor:{}", location_id));
+                for enemy_id in enemy_ids {
+                    keys.push(format!("event:noise_attractor_enemy:{}", enemy_id));
+                }
+            }
+            GameEvent::SightAttractorAcquired {
+                enemy_id,
+                subject_id,
+                location_id,
+            } => {
+                keys.push(format!("event:sight_attractor:{}", location_id));
+                keys.push(format!("event:sight_chaser:{}", enemy_id));
+                keys.push(format!("event:sight_subject:{}", subject_id));
+            }
+            GameEvent::SightAttractorMissed {
+                enemy_id,
+                subject_id,
+                location_id,
+                ..
+            } => {
+                keys.push(format!("event:sight_missed:{}", location_id));
+                keys.push(format!("event:sight_miss_chaser:{}", enemy_id));
+                keys.push(format!("event:sight_miss_subject:{}", subject_id));
+            }
+            GameEvent::SightAttractorLost {
+                enemy_id,
+                subject_id,
+            } => {
+                keys.push(format!("event:sight_lost:{}", enemy_id));
+                keys.push(format!("event:sight_lost_subject:{}", subject_id));
+            }
+            GameEvent::SpawnedEnemyMoved {
+                enemy_id,
+                from_location_id,
+                to_location_id,
+                target_location_id,
+            } => {
+                keys.push(format!("event:spawned_enemy_moved:{}", enemy_id));
+                keys.push(format!("event:spawned_enemy_from:{}", from_location_id));
+                keys.push(format!("event:spawned_enemy_to:{}", to_location_id));
+                keys.push(format!("event:spawned_enemy_target:{}", target_location_id));
+            }
+            GameEvent::SpawnedEnemyWaited {
+                enemy_id,
+                location_id,
+                ..
+            } => {
+                keys.push(format!("event:spawned_enemy_waited:{}", enemy_id));
+                keys.push(format!("event:spawned_enemy_wait_location:{}", location_id));
+            }
+            GameEvent::SpawnedEnemyAttackedHazard {
+                enemy_id,
+                hazard_kind,
+                location_id,
+                broken,
+                ..
+            } => {
+                keys.push(format!("event:spawned_enemy_hazard_attack:{}", enemy_id));
+                keys.push(format!("event:spawned_enemy_hazard:{:?}", hazard_kind));
+                keys.push(format!(
+                    "event:spawned_enemy_hazard_location:{}",
+                    location_id
+                ));
+                if *broken {
+                    keys.push(format!("event:spawned_enemy_hazard_broken:{}", location_id));
+                }
+            }
             GameEvent::MovementBlocked { .. } => keys.push("event:boundary_blocked".to_owned()),
             GameEvent::LocationUnlocked {
                 location_id,
@@ -609,6 +934,19 @@ fn build_encounter_snapshot(
             status,
             enemy.tags.join(", ")
         ));
+    }
+
+    for enemy_id in run
+        .enemies_alive
+        .iter()
+        .filter(|enemy_id| enemy_id.starts_with("noise_spawn_"))
+    {
+        if let Some(enemy) = find_enemy(bundle, enemy_id) {
+            lines.push(format!(
+                "Enemy: {} [alive] | spawned instance {}",
+                enemy.name, enemy_id
+            ));
+        }
     }
 
     for boss in &bundle.bosses {
@@ -792,9 +1130,13 @@ fn first_live_location_threat<'a>(
         }
     }
 
-    for enemy_id in &location.enemies {
+    let enemy_ids = run
+        .location_enemies
+        .get(&location.id)
+        .unwrap_or(&location.enemies);
+    for enemy_id in enemy_ids {
         if run.enemies_alive.contains(enemy_id)
-            && let Some(enemy) = bundle.enemies.iter().find(|enemy| enemy.id == *enemy_id)
+            && let Some(enemy) = find_enemy(bundle, enemy_id)
         {
             return Some((enemy.id.as_str(), &enemy.media));
         }
@@ -965,7 +1307,7 @@ fn lookup_encounter(
         EncounterKind::Enemy => bundle
             .enemies
             .iter()
-            .find(|it| it.id == target_id)
+            .find(|it| it.id == enemy_template_id(target_id))
             .map(|it| (it.name.clone(), it.description.clone()))
             .unwrap_or_else(|| (target_id.to_owned(), "Unknown enemy target.".to_owned())),
         EncounterKind::Boss => bundle

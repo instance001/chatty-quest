@@ -73,6 +73,7 @@ pub struct SnapshotLocationState {
     pub known_location_count: usize,
     pub visited_location_count: usize,
     pub locked_locations: Vec<String>,
+    pub broken_locked_locations: Vec<String>,
     pub barricaded_locations: Vec<String>,
 }
 
@@ -82,6 +83,36 @@ pub struct SnapshotEncounterState {
     pub local_live_bosses: Vec<String>,
     pub defeated_enemies: Vec<String>,
     pub defeated_bosses: Vec<String>,
+    pub spawned_enemy_targets: Vec<SnapshotSpawnedEnemyTarget>,
+    pub spawned_enemy_origins: Vec<SnapshotSpawnedEnemyOrigin>,
+    pub spawned_enemy_searching: Vec<String>,
+    pub spawned_enemy_sight_targets: Vec<SnapshotSpawnedEnemySightTarget>,
+    pub spawned_enemy_sight_delays: Vec<SnapshotSpawnedEnemySightDelay>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SnapshotSpawnedEnemyTarget {
+    pub enemy_id: String,
+    pub target_location_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SnapshotSpawnedEnemyOrigin {
+    pub enemy_id: String,
+    pub origin_location_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SnapshotSpawnedEnemySightTarget {
+    pub enemy_id: String,
+    pub subject_id: String,
+    pub location_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SnapshotSpawnedEnemySightDelay {
+    pub enemy_id: String,
+    pub remaining_ticks: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -174,6 +205,7 @@ pub fn build_run_snapshot_envelope(
                 known_location_count: run.known_locations.len(),
                 visited_location_count: run.visited_locations.len(),
                 locked_locations: sorted_strings(&run.locked_locations),
+                broken_locked_locations: sorted_strings(&run.broken_locked_locations),
                 barricaded_locations: sorted_strings(&run.barricaded_locations),
             },
             encounter_state: SnapshotEncounterState {
@@ -189,6 +221,11 @@ pub fn build_run_snapshot_envelope(
                 ),
                 defeated_enemies: sorted_strings(&run.enemies_defeated),
                 defeated_bosses: sorted_strings(&run.bosses_defeated),
+                spawned_enemy_targets: spawned_enemy_targets(run),
+                spawned_enemy_origins: spawned_enemy_origins(run),
+                spawned_enemy_searching: sorted_strings(&run.spawned_enemy_searching),
+                spawned_enemy_sight_targets: spawned_enemy_sight_targets(run),
+                spawned_enemy_sight_delays: spawned_enemy_sight_delays(run),
             },
             inventory_state: SnapshotInventoryState {
                 carried_items: run.inventory.iter().map(|item| item.id.clone()).collect(),
@@ -205,6 +242,69 @@ pub fn build_run_snapshot_envelope(
             boundary_note: run.boundary_response.clone(),
         },
     }
+}
+
+fn spawned_enemy_targets(run: &RunState) -> Vec<SnapshotSpawnedEnemyTarget> {
+    let mut targets = run
+        .spawned_enemy_targets
+        .iter()
+        .map(
+            |(enemy_id, target_location_id)| SnapshotSpawnedEnemyTarget {
+                enemy_id: enemy_id.clone(),
+                target_location_id: target_location_id.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    targets.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    targets
+}
+
+fn spawned_enemy_origins(run: &RunState) -> Vec<SnapshotSpawnedEnemyOrigin> {
+    let mut origins = run
+        .spawned_enemy_origins
+        .iter()
+        .map(
+            |(enemy_id, origin_location_id)| SnapshotSpawnedEnemyOrigin {
+                enemy_id: enemy_id.clone(),
+                origin_location_id: origin_location_id.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    origins.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    origins
+}
+
+fn spawned_enemy_sight_targets(run: &RunState) -> Vec<SnapshotSpawnedEnemySightTarget> {
+    let mut targets = run
+        .spawned_enemy_sight_targets
+        .iter()
+        .map(|(enemy_id, location_id)| SnapshotSpawnedEnemySightTarget {
+            enemy_id: enemy_id.clone(),
+            subject_id: run
+                .spawned_enemy_sight_subjects
+                .get(enemy_id)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            location_id: location_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    targets.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    targets
+}
+
+fn spawned_enemy_sight_delays(run: &RunState) -> Vec<SnapshotSpawnedEnemySightDelay> {
+    let mut delays = run
+        .spawned_enemy_sight_delays
+        .iter()
+        .map(
+            |(enemy_id, remaining_ticks)| SnapshotSpawnedEnemySightDelay {
+                enemy_id: enemy_id.clone(),
+                remaining_ticks: *remaining_ticks,
+            },
+        )
+        .collect::<Vec<_>>();
+    delays.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    delays
 }
 
 fn sorted_strings(values: &std::collections::HashSet<String>) -> Vec<String> {
@@ -264,6 +364,26 @@ mod tests {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
         let mut run = generate_new_run(&bundle).state;
+        run.spawned_enemy_targets.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "front_verandah".to_owned(),
+        );
+        run.spawned_enemy_origins.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "back_garden".to_owned(),
+        );
+        run.spawned_enemy_searching
+            .insert("noise_spawn_1_shambler_front_gate".to_owned());
+        run.spawned_enemy_sight_targets.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "kitchen".to_owned(),
+        );
+        run.spawned_enemy_sight_subjects.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "player".to_owned(),
+        );
+        run.spawned_enemy_sight_delays
+            .insert("noise_spawn_1_shambler_front_gate".to_owned(), 1);
         let moved = apply_action(
             &mut run,
             &bundle,
@@ -292,6 +412,58 @@ mod tests {
         assert!(
             envelope
                 .body
+                .encounter_state
+                .spawned_enemy_targets
+                .iter()
+                .any(
+                    |target| target.enemy_id == "noise_spawn_1_shambler_front_gate"
+                        && target.target_location_id == "front_verandah"
+                )
+        );
+        assert!(
+            envelope
+                .body
+                .encounter_state
+                .spawned_enemy_origins
+                .iter()
+                .any(
+                    |origin| origin.enemy_id == "noise_spawn_1_shambler_front_gate"
+                        && origin.origin_location_id == "back_garden"
+                )
+        );
+        assert!(
+            envelope
+                .body
+                .encounter_state
+                .spawned_enemy_searching
+                .contains(&"noise_spawn_1_shambler_front_gate".to_owned())
+        );
+        assert!(
+            envelope
+                .body
+                .encounter_state
+                .spawned_enemy_sight_targets
+                .iter()
+                .any(
+                    |target| target.enemy_id == "noise_spawn_1_shambler_front_gate"
+                        && target.subject_id == "player"
+                        && target.location_id == "kitchen"
+                )
+        );
+        assert!(
+            envelope
+                .body
+                .encounter_state
+                .spawned_enemy_sight_delays
+                .iter()
+                .any(
+                    |delay| delay.enemy_id == "noise_spawn_1_shambler_front_gate"
+                        && delay.remaining_ticks == 1
+                )
+        );
+        assert!(
+            envelope
+                .body
                 .rolling_summary
                 .iter()
                 .any(|line| line.contains("Moved from 'front_verandah' to 'kitchen'"))
@@ -305,6 +477,7 @@ mod tests {
         let mut run = generate_new_run(&bundle).state;
         run.active_objective.completed = true;
         run.barricaded_locations.insert("front_verandah".to_owned());
+        run.broken_locked_locations.insert("garage".to_owned());
         run.noise_level = 3;
 
         let envelope = build_run_snapshot_envelope(&bundle, &run, &[]);
@@ -323,6 +496,14 @@ mod tests {
                 .important_flags
                 .iter()
                 .any(|flag| flag == "epilogue_open")
+        );
+        assert!(
+            envelope
+                .body
+                .location_state
+                .broken_locked_locations
+                .iter()
+                .any(|location_id| location_id == "garage")
         );
         assert!(
             envelope

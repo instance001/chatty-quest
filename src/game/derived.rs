@@ -198,6 +198,51 @@ pub fn security_summary_rows(run: &RunState, bundle: Option<&DatapackBundle>) ->
     rows
 }
 
+pub fn attractor_summary_rows(run: &RunState, bundle: Option<&DatapackBundle>) -> Vec<String> {
+    let mut enemy_ids = run
+        .enemies_alive
+        .iter()
+        .filter(|enemy_id| enemy_id.starts_with("noise_spawn_"))
+        .cloned()
+        .collect::<Vec<_>>();
+    enemy_ids.sort();
+
+    enemy_ids
+        .into_iter()
+        .map(|enemy_id| {
+            let enemy_label = enemy_label(bundle, &enemy_id);
+            if let Some(location_id) = run.spawned_enemy_sight_targets.get(&enemy_id) {
+                let subject = run
+                    .spawned_enemy_sight_subjects
+                    .get(&enemy_id)
+                    .map(|subject_id| subject_label(bundle, subject_id))
+                    .unwrap_or_else(|| "unknown subject".to_owned());
+                format!(
+                    "Attractor: {} tracking by sight toward {} at {}.",
+                    enemy_label,
+                    subject,
+                    location_label(bundle, location_id)
+                )
+            } else if run.spawned_enemy_searching.contains(&enemy_id) {
+                let origin = run
+                    .spawned_enemy_origins
+                    .get(&enemy_id)
+                    .map(|location_id| location_label(bundle, location_id))
+                    .unwrap_or_else(|| "unknown origin".to_owned());
+                format!("Attractor: {} searching; origin {}.", enemy_label, origin)
+            } else if let Some(location_id) = run.spawned_enemy_targets.get(&enemy_id) {
+                format!(
+                    "Attractor: {} tracking noise toward {}.",
+                    enemy_label,
+                    location_label(bundle, location_id)
+                )
+            } else {
+                format!("Attractor: {} has no active attractor.", enemy_label)
+            }
+        })
+        .collect()
+}
+
 fn objective_item_label(bundle: Option<&DatapackBundle>, item_id: &str) -> String {
     bundle
         .and_then(|bundle| {
@@ -232,6 +277,45 @@ fn objective_location_label(bundle: Option<&DatapackBundle>, location_id: &str) 
                 .map(|location| format!("{} ({})", location.name, location.id))
         })
         .unwrap_or_else(|| location_id.to_owned())
+}
+
+fn enemy_label(bundle: Option<&DatapackBundle>, enemy_id: &str) -> String {
+    bundle
+        .and_then(|bundle| {
+            let template_id = enemy_template_id(enemy_id);
+            bundle
+                .enemies
+                .iter()
+                .find(|enemy| enemy.id == template_id)
+                .map(|enemy| format!("{} ({})", enemy.name, enemy_id))
+        })
+        .unwrap_or_else(|| enemy_id.to_owned())
+}
+
+fn subject_label(bundle: Option<&DatapackBundle>, subject_id: &str) -> String {
+    if subject_id == "player" {
+        return "player".to_owned();
+    }
+    enemy_label(bundle, subject_id)
+}
+
+fn location_label(bundle: Option<&DatapackBundle>, location_id: &str) -> String {
+    bundle
+        .and_then(|bundle| {
+            bundle
+                .locations
+                .iter()
+                .find(|location| location.id == location_id)
+                .map(|location| format!("{} ({})", location.name, location.id))
+        })
+        .unwrap_or_else(|| location_id.to_owned())
+}
+
+fn enemy_template_id(enemy_id: &str) -> &str {
+    enemy_id
+        .strip_prefix("noise_spawn_")
+        .and_then(|spawned| spawned.split_once('_').map(|(_, template_id)| template_id))
+        .unwrap_or(enemy_id)
 }
 
 fn open_barricade_target_labels(

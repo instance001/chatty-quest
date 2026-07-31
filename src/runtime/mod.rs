@@ -112,8 +112,30 @@ mod tests {
         run.hp = 7;
         run.active_objective.completed = true;
         run.locked_locations.remove("garage");
+        run.broken_locked_locations.insert("back_garden".to_owned());
         run.barricaded_locations.insert("front_verandah".to_owned());
         run.noise_level = 2;
+        run.noise_spawn_count = 1;
+        run.spawned_enemy_targets.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "kitchen".to_owned(),
+        );
+        run.spawned_enemy_origins.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "back_garden".to_owned(),
+        );
+        run.spawned_enemy_searching
+            .insert("noise_spawn_1_shambler_front_gate".to_owned());
+        run.spawned_enemy_sight_targets.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "front_verandah".to_owned(),
+        );
+        run.spawned_enemy_sight_subjects.insert(
+            "noise_spawn_1_shambler_front_gate".to_owned(),
+            "player".to_owned(),
+        );
+        run.spawned_enemy_sight_delays
+            .insert("noise_spawn_1_shambler_front_gate".to_owned(), 1);
 
         let payload = SavePayload {
             save_version: current_save_version(),
@@ -167,10 +189,63 @@ mod tests {
         assert!(
             restored
                 .run_state
+                .broken_locked_locations
+                .contains("back_garden")
+        );
+        assert!(
+            restored
+                .run_state
                 .barricaded_locations
                 .contains("front_verandah")
         );
         assert_eq!(restored.run_state.noise_level, 2);
+        assert_eq!(restored.run_state.noise_spawn_count, 1);
+        assert_eq!(
+            restored
+                .run_state
+                .spawned_enemy_targets
+                .get("noise_spawn_1_shambler_front_gate")
+                .map(String::as_str),
+            Some("kitchen")
+        );
+        assert_eq!(
+            restored
+                .run_state
+                .spawned_enemy_origins
+                .get("noise_spawn_1_shambler_front_gate")
+                .map(String::as_str),
+            Some("back_garden")
+        );
+        assert!(
+            restored
+                .run_state
+                .spawned_enemy_searching
+                .contains("noise_spawn_1_shambler_front_gate")
+        );
+        assert_eq!(
+            restored
+                .run_state
+                .spawned_enemy_sight_targets
+                .get("noise_spawn_1_shambler_front_gate")
+                .map(String::as_str),
+            Some("front_verandah")
+        );
+        assert_eq!(
+            restored
+                .run_state
+                .spawned_enemy_sight_subjects
+                .get("noise_spawn_1_shambler_front_gate")
+                .map(String::as_str),
+            Some("player")
+        );
+        assert_eq!(
+            restored
+                .run_state
+                .spawned_enemy_sight_delays
+                .get("noise_spawn_1_shambler_front_gate")
+                .copied(),
+            Some(1)
+        );
         assert_eq!(restored.run_state.inventory.len(), run.inventory.len());
         assert_eq!(restored.run_state.equipped_item_id, run.equipped_item_id);
     }

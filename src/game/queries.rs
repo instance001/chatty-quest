@@ -26,7 +26,9 @@ pub fn describe_location(
     )];
 
     if location.locked {
-        let lock_state = if state.locked_locations.contains(&location.id) {
+        let lock_state = if state.broken_locked_locations.contains(&location.id) {
+            "Broken"
+        } else if state.locked_locations.contains(&location.id) {
             "Locked"
         } else {
             "Unlocked"
@@ -75,7 +77,9 @@ pub fn describe_location(
             .iter()
             .filter_map(|id| {
                 find_location(bundle, id).map(|location| {
-                    if state.locked_locations.contains(&location.id) {
+                    if state.broken_locked_locations.contains(&location.id) {
+                        format!("{} [broken]", location.name)
+                    } else if state.locked_locations.contains(&location.id) {
                         format!("{} [locked]", location.name)
                     } else {
                         location.name.clone()
@@ -165,7 +169,8 @@ pub fn find_item_by_name_or_id<'a>(
 }
 
 pub fn find_enemy<'a>(bundle: &'a DatapackBundle, id: &str) -> Option<&'a EnemyTemplate> {
-    bundle.enemies.iter().find(|enemy| enemy.id == id)
+    let template_id = enemy_template_id(id);
+    bundle.enemies.iter().find(|enemy| enemy.id == template_id)
 }
 
 pub fn find_enemy_by_name_or_id<'a>(
@@ -176,6 +181,13 @@ pub fn find_enemy_by_name_or_id<'a>(
         .enemies
         .iter()
         .find(|enemy| matches_name(query, &enemy.id, &enemy.name))
+}
+
+pub fn enemy_template_id(enemy_id: &str) -> &str {
+    enemy_id
+        .strip_prefix("noise_spawn_")
+        .and_then(|spawned| spawned.split_once('_').map(|(_, template_id)| template_id))
+        .unwrap_or(enemy_id)
 }
 
 pub fn find_boss<'a>(bundle: &'a DatapackBundle, id: &str) -> Option<&'a BossTemplate> {

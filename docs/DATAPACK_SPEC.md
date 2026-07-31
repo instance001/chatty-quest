@@ -122,6 +122,7 @@ Likely `v0.1` responsibilities:
 - lock and unlock behavior
 - objective selection mode
 - combat baseline modifiers if needed
+- sight acquisition, sight chase delay, and spawned hazard break percentages
 - fail-state or boundary-response text hooks
 
 This is where `Property Siege Classic` should express that the player is trapped on the property. That behavior should not be hidden in engine code.
@@ -228,12 +229,16 @@ Suggested enemy fields:
 - short `description`
 - `narrator_brief`
 - `tags`
+- `can_hear`
+- `can_see`
 - HP or durability
 - attack strength
 - encounter flavor text hooks if useful
 - optional media references
 - optional placement rules
 - optional future location-context media overrides
+
+`can_hear` and `can_see` are mechanical sense flags. They default to `true` for older datapacks. Set them explicitly when a creature should ignore noise attraction, visual acquisition, or future narrator/AI hooks tied to those senses.
 
 `v0.1` enemy templates should remain small and combat-focused.
 
@@ -248,11 +253,15 @@ Suggested boss fields:
 - short `description`
 - `narrator_brief`
 - `tags`
+- `can_hear`
+- `can_see`
 - HP
 - attack strength
 - special scenario role
 - optional lock or objective linkage
 - optional media references
+
+Boss sense flags default to `true`, matching enemy templates. Current demo behavior mostly uses these flags for enemy-backed runtime movement, but boss templates expose the same truth now for future mobile bosses, narrator context, and modder consistency.
 
 For `v0.1`, the important point is not complexity. It is that boss state and objective relevance are explicit and deterministic.
 

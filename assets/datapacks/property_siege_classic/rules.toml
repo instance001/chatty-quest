@@ -4,3 +4,6 @@ boundary_mode = "scenario_blocked"
 boundary_response = "You make it three fences before the horde eats you, idiot."
 objective_mode = "single_frozen_objective"
 chaos_mode_note = "Chaos only affects narrator looseness and presentation tone; the reducer still owns every lasting state change."
+sight_acquire_chance_percent = 70
+sight_chase_delay_chance_percent = 35
+spawned_hazard_break_chance_percent = 35

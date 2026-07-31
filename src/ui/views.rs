@@ -97,6 +97,7 @@ pub struct SelectedDatapackPreview {
     pub objective_count: usize,
     pub narrator_brief_count: usize,
     pub media_reference_count: usize,
+    pub sensory_template_count: usize,
     pub boundary_response: Option<String>,
     pub dm_style_preview: Option<String>,
     pub world_tone_preview: Option<String>,
@@ -164,8 +165,10 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
                             record.objective_count
                         ));
                         ui.small(format!(
-                            "Presentation coverage: {} narrator briefs | {} media refs",
-                            record.narrator_brief_count, record.media_reference_count
+                            "Presentation coverage: {} narrator briefs | {} media refs | {} sensory templates",
+                            record.narrator_brief_count,
+                            record.media_reference_count,
+                            record.sensory_template_count
                         ));
                     }
 
@@ -486,13 +489,11 @@ pub fn show_game_tab(
                                     .button(format!(
                                         "Go to {}{}",
                                         exit.destination_name,
-                                        if exit.locked {
-                                            " [locked]"
-                                        } else if exit.barricaded {
-                                            " [barricaded]"
-                                        } else {
-                                            ""
-                                        }
+                                        location_state_suffix(
+                                            exit.locked,
+                                            exit.broken,
+                                            exit.barricaded
+                                        )
                                     ))
                                     .clicked()
                                 {
@@ -530,13 +531,11 @@ pub fn show_game_tab(
                                 "{} {}{}",
                                 location.marker,
                                 location.location_name,
-                                if location.locked {
-                                    " [locked]"
-                                } else if location.barricaded {
-                                    " [barricaded]"
-                                } else {
-                                    ""
-                                }
+                                location_state_suffix(
+                                    location.locked,
+                                    location.broken,
+                                    location.barricaded
+                                )
                             ));
                         }
                     }
@@ -856,6 +855,13 @@ pub fn show_character_tab(
                     ui.small(row);
                 }
             }
+            if !summary.attractor_summary_rows.is_empty() {
+                ui.separator();
+                ui.label("Active attractors");
+                for row in &summary.attractor_summary_rows {
+                    ui.small(row);
+                }
+            }
             ui.small(format!(
                 "Enemies defeated: {} | Bosses defeated: {}",
                 summary.enemies_defeated, summary.bosses_defeated
@@ -866,6 +872,14 @@ pub fn show_character_tab(
                     "none".to_owned()
                 } else {
                     summary.locked_locations.join(", ")
+                }
+            ));
+            ui.small(format!(
+                "Broken gates: {}",
+                if summary.broken_locked_locations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    summary.broken_locked_locations.join(", ")
                 }
             ));
             ui.small(format!(
@@ -1050,6 +1064,18 @@ fn badge_chip(ui: &mut egui::Ui, label: &str, color: egui::Color32) {
         .show(ui, |ui| {
             ui.small(egui::RichText::new(label).color(color));
         });
+}
+
+fn location_state_suffix(locked: bool, broken: bool, barricaded: bool) -> &'static str {
+    if locked {
+        " [locked]"
+    } else if broken {
+        " [broken]"
+    } else if barricaded {
+        " [barricaded]"
+    } else {
+        ""
+    }
 }
 
 fn show_media_slot(ui: &mut egui::Ui, label: &str, asset: Option<&crate::media::MediaAssetStatus>) {
@@ -1335,6 +1361,9 @@ fn render_map_tile(
                     if display.show_locked_badge {
                         badge_chip(ui, "Locked", egui::Color32::from_rgb(196, 156, 98));
                     }
+                    if display.show_broken_badge {
+                        badge_chip(ui, "Broken", egui::Color32::from_rgb(188, 116, 92));
+                    }
                     if display.show_barricaded_badge {
                         badge_chip(ui, "Barricaded", egui::Color32::from_rgb(104, 184, 156));
                     }
@@ -1376,13 +1405,7 @@ fn show_current_exit_strip(
                         "{} {}{}",
                         exit.direction_label,
                         exit.destination_name,
-                        if exit.locked {
-                            " [locked]"
-                        } else if exit.barricaded {
-                            " [barricaded]"
-                        } else {
-                            ""
-                        }
+                        location_state_suffix(exit.locked, exit.broken, exit.barricaded)
                     ))
                     .clicked()
                 {
@@ -1567,8 +1590,10 @@ fn show_datapack_status(
                 ui.small(format!("Boundary response preview: {}", boundary));
             }
             ui.small(format!(
-                "Pack presentation: {} narrator briefs | {} media refs",
-                record.narrator_brief_count, record.media_reference_count
+                "Pack presentation: {} narrator briefs | {} media refs | {} sensory templates",
+                record.narrator_brief_count,
+                record.media_reference_count,
+                record.sensory_template_count
             ));
             if let Some(dm_style) = &record.dm_style_preview {
                 ui.small(format!("DM capsule preview: {}", dm_style));
