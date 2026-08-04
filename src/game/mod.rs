@@ -1,10 +1,21 @@
 pub mod actions;
+mod combat;
+mod context;
 pub mod derived;
+mod epilogue;
 pub mod generation;
+mod inspect;
+mod items;
+mod movement;
 pub mod narrator;
+mod noise;
+mod objectives;
 mod queries;
 pub mod reducer;
+mod spawned_ai;
 pub mod state;
+mod summary;
+mod wait;
 
 pub use actions::{ActionOutcome, GameAction, GameEvent, parse_command};
 pub use generation::{GeneratedRun, generate_new_run};
