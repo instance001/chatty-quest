@@ -36,6 +36,10 @@ pub struct DatapackSummary {
     pub author: String,
     pub description: String,
     pub primary_scenario: String,
+    pub required_engine_version: Option<String>,
+    pub license: Option<String>,
+    pub attribution: Option<String>,
+    pub capabilities: Vec<String>,
     pub boundary_response: Option<String>,
     pub location_count: usize,
     pub item_count: usize,
@@ -64,6 +68,8 @@ pub struct DatapackCatalog {
 #[derive(Clone, Debug)]
 pub struct InvalidDatapack {
     pub folder_name: String,
+    pub display_name: Option<String>,
+    pub version: Option<String>,
     pub errors: Vec<String>,
 }
 
@@ -106,6 +112,14 @@ pub struct PackToml {
     pub author: String,
     pub description: String,
     pub primary_scenario: String,
+    #[serde(default)]
+    pub required_engine_version: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub attribution: Option<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -360,6 +374,8 @@ pub fn discover_datapacks() -> DatapackCatalog {
     let Ok(entries) = fs::read_dir(root) else {
         invalid.push(InvalidDatapack {
             folder_name: DATAPACKS_ROOT.to_owned(),
+            display_name: None,
+            version: None,
             errors: vec!["Datapack root folder could not be read.".to_owned()],
         });
 
@@ -378,10 +394,15 @@ pub fn discover_datapacks() -> DatapackCatalog {
                 folder_name,
                 summary: bundle_to_summary(&bundle),
             }),
-            Err(errors) => invalid.push(InvalidDatapack {
-                folder_name,
-                errors,
-            }),
+            Err(errors) => {
+                let manifest = read_pack_manifest_preview(&path);
+                invalid.push(InvalidDatapack {
+                    folder_name,
+                    display_name: manifest.as_ref().map(|pack| pack.display_name.clone()),
+                    version: manifest.as_ref().map(|pack| pack.version.clone()),
+                    errors,
+                });
+            }
         }
     }
 
@@ -389,6 +410,12 @@ pub fn discover_datapacks() -> DatapackCatalog {
     invalid.sort_by(|a, b| a.folder_name.cmp(&b.folder_name));
 
     DatapackCatalog { valid, invalid }
+}
+
+fn read_pack_manifest_preview(path: &Path) -> Option<PackToml> {
+    fs::read_to_string(path.join("pack.toml"))
+        .ok()
+        .and_then(|contents| toml::from_str::<PackToml>(&contents).ok())
 }
 
 pub fn load_datapack_bundle_by_folder(folder_name: &str) -> Result<DatapackBundle, Vec<String>> {
@@ -1199,6 +1226,10 @@ fn bundle_to_summary(bundle: &DatapackBundle) -> DatapackSummary {
         author: bundle.pack.author.clone(),
         description: bundle.pack.description.clone(),
         primary_scenario: bundle.pack.primary_scenario.clone(),
+        required_engine_version: bundle.pack.required_engine_version.clone(),
+        license: bundle.pack.license.clone(),
+        attribution: bundle.pack.attribution.clone(),
+        capabilities: bundle.pack.capabilities.clone(),
         boundary_response: bundle.rules.boundary_response.clone(),
         location_count: bundle.locations.len(),
         item_count: bundle.items.len(),

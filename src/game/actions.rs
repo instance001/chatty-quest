@@ -42,6 +42,10 @@ pub enum GameEvent {
     ActionRejected {
         reason: String,
     },
+    SelectedPackFailedValidation {
+        folder_name: String,
+        reason: String,
+    },
     LocationLooked {
         location_id: String,
     },

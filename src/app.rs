@@ -4,8 +4,8 @@ use eframe::egui;
 
 use crate::app_paths;
 use crate::data::datapacks::{
-    DatapackBundle, DatapackCatalog, DatapackRecord, datapack_schema_version, discover_datapacks,
-    load_datapack_bundle_by_folder,
+    DatapackBundle, DatapackCatalog, DatapackRecord, InvalidDatapack, datapack_schema_version,
+    discover_datapacks, load_datapack_bundle_by_folder,
 };
 use crate::diagnostics::build_diagnostic_report;
 use crate::game::narrator::{MockNarrator, Narrator};
@@ -115,8 +115,14 @@ impl ChattyQuestApp {
         let selected_datapack = datapacks
             .valid
             .first()
-            .map(|record| record.summary.display_name.clone())
-            .unwrap_or_else(|| "No valid datapacks found".to_owned());
+            .map(|record| record.folder_name.clone())
+            .or_else(|| {
+                datapacks
+                    .invalid
+                    .first()
+                    .map(|record| record.folder_name.clone())
+            })
+            .unwrap_or_else(|| "No cartridges found".to_owned());
 
         Self {
             screen: AppScreen::Splash,
@@ -235,11 +241,25 @@ impl ChattyQuestApp {
                     boundary_response: record.summary.boundary_response.clone(),
                     dm_style_preview: record.summary.dm_style_preview.clone(),
                     world_tone_preview: record.summary.world_tone_preview.clone(),
+                    required_engine_version: record.summary.required_engine_version.clone(),
+                    license: record.summary.license.clone(),
+                    attribution: record.summary.attribution.clone(),
+                    capabilities: record.summary.capabilities.clone(),
                 });
+        let selected_invalid = self.selected_invalid_datapack().map(|record| {
+            crate::ui::SelectedInvalidDatapackPreview {
+                folder_name: record.folder_name.clone(),
+                display_name: record.display_name.clone(),
+                version: record.version.clone(),
+                errors: record.errors.clone(),
+            }
+        });
+        let selected_label = self.selected_datapack_label();
         let action = show_setup_screen(
             ctx,
             SetupScreenModel {
                 selected_datapack: &mut self.setup.selected_datapack,
+                selected_datapack_label: selected_label,
                 difficulty: &mut self.setup.difficulty,
                 chaos_mode: &mut self.setup.chaos_mode,
                 fog_mode: &mut self.setup.fog_mode,
@@ -248,6 +268,7 @@ impl ChattyQuestApp {
                 gpu_narrator_model: &mut self.setup.gpu_narrator_model,
                 datapacks: &self.datapacks,
                 selected_record,
+                selected_invalid,
                 header_image_path: asset_if_present(SETUP_HEADER_IMAGE_PATH),
             },
         );
@@ -256,6 +277,7 @@ impl ChattyQuestApp {
             SetupScreenAction::None => {}
             SetupScreenAction::GenerateGame => self.start_new_run(),
             SetupScreenAction::LoadGame => self.load_saved_run(),
+            SetupScreenAction::RefreshCartridges => self.refresh_datapacks(),
         }
     }
 
@@ -406,16 +428,103 @@ impl ChattyQuestApp {
     }
 
     fn selected_datapack_record(&self) -> Option<&DatapackRecord> {
+        self.datapacks.valid.iter().find(|record| {
+            record.folder_name == self.setup.selected_datapack
+                || record.summary.display_name == self.setup.selected_datapack
+        })
+    }
+
+    fn selected_invalid_datapack(&self) -> Option<&InvalidDatapack> {
         self.datapacks
+            .invalid
+            .iter()
+            .find(|record| record.folder_name == self.setup.selected_datapack)
+    }
+
+    fn selected_datapack_label(&self) -> String {
+        if let Some(record) = self.selected_datapack_record() {
+            format!("{} [ready]", record.summary.display_name)
+        } else if let Some(record) = self.selected_invalid_datapack() {
+            format!(
+                "{} [broken]",
+                record
+                    .display_name
+                    .as_deref()
+                    .unwrap_or(record.folder_name.as_str())
+            )
+        } else {
+            self.setup.selected_datapack.clone()
+        }
+    }
+
+    fn refresh_datapacks(&mut self) {
+        let previous_selection = self.setup.selected_datapack.clone();
+        self.datapacks = discover_datapacks();
+        let still_present = self
+            .datapacks
             .valid
             .iter()
-            .find(|record| record.summary.display_name == self.setup.selected_datapack)
+            .any(|record| record.folder_name == previous_selection)
+            || self
+                .datapacks
+                .invalid
+                .iter()
+                .any(|record| record.folder_name == previous_selection);
+
+        if !still_present {
+            self.setup.selected_datapack = self
+                .datapacks
+                .valid
+                .first()
+                .map(|record| record.folder_name.clone())
+                .or_else(|| {
+                    self.datapacks
+                        .invalid
+                        .first()
+                        .map(|record| record.folder_name.clone())
+                })
+                .unwrap_or_else(|| "No cartridges found".to_owned());
+        }
+
+        self.log_lines.push(format!(
+            "System: Cartridge bay refreshed: {} ready, {} broken.",
+            self.datapacks.valid.len(),
+            self.datapacks.invalid.len()
+        ));
     }
 
     fn start_new_run(&mut self) {
         let Some(record) = self.selected_datapack_record() else {
+            let (folder_name, reason) = if let Some(invalid) = self.selected_invalid_datapack() {
+                (
+                    invalid.folder_name.clone(),
+                    invalid
+                        .errors
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Selected cartridge failed validation.".to_owned()),
+                )
+            } else {
+                (
+                    self.setup.selected_datapack.clone(),
+                    "Selected cartridge is not currently available.".to_owned(),
+                )
+            };
+            self.diagnostic_events
+                .push(GameEvent::SelectedPackFailedValidation {
+                    folder_name: folder_name.clone(),
+                    reason: reason.clone(),
+                });
+            self.current_bundle = None;
+            self.current_run = None;
+            self.narrator = None;
+            self.log_lines.clear();
+            self.log_lines.push(format!(
+                "System: Selected cartridge '{}' failed validation and was not booted.",
+                folder_name
+            ));
             self.log_lines
-                .push("Cannot generate a run without a valid datapack.".to_owned());
+                .push(format!("System: Validation error: {}", reason));
             return;
         };
 

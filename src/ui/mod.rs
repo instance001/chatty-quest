@@ -14,7 +14,8 @@ pub(crate) use derived::{
     build_media_panel_display, build_media_panel_preview_model, build_outcome_banner,
 };
 pub use views::{
-    AssetViewerRequest, SelectedDatapackPreview, SetupScreenAction, SetupScreenModel,
-    SplashScreenModel, show_asset_viewer, show_character_tab, show_diagnostics_tab,
-    show_game_action_bar, show_game_tab, show_inventory_tab, show_setup_screen, show_splash_screen,
+    AssetViewerRequest, SelectedDatapackPreview, SelectedInvalidDatapackPreview, SetupScreenAction,
+    SetupScreenModel, SplashScreenModel, show_asset_viewer, show_character_tab,
+    show_diagnostics_tab, show_game_action_bar, show_game_tab, show_inventory_tab,
+    show_setup_screen, show_splash_screen,
 };

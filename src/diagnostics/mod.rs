@@ -67,6 +67,8 @@ pub struct MediaAssetEntry {
 #[derive(Clone)]
 pub struct InvalidDatapackReport {
     pub folder_name: String,
+    pub display_name: Option<String>,
+    pub version: Option<String>,
     pub errors: Vec<String>,
 }
 
@@ -194,6 +196,8 @@ pub fn build_diagnostic_report(
         .iter()
         .map(|invalid| InvalidDatapackReport {
             folder_name: invalid.folder_name.clone(),
+            display_name: invalid.display_name.clone(),
+            version: invalid.version.clone(),
             errors: invalid.errors.clone(),
         })
         .collect::<Vec<_>>();
@@ -535,7 +539,9 @@ fn event_counters(events: &[GameEvent]) -> EventCounters {
             GameEvent::Waited { .. } => counters.waits += 1,
             GameEvent::RunWon => counters.wins += 1,
             GameEvent::RunLost => counters.losses += 1,
-            GameEvent::ActionRejected { .. } => counters.rejections += 1,
+            GameEvent::ActionRejected { .. } | GameEvent::SelectedPackFailedValidation { .. } => {
+                counters.rejections += 1
+            }
             _ => {}
         }
     }
@@ -547,6 +553,13 @@ fn format_game_event(event: &GameEvent) -> String {
     match event {
         GameEvent::HelpShown => "HelpShown".to_owned(),
         GameEvent::ActionRejected { reason } => format!("ActionRejected(reason={})", reason),
+        GameEvent::SelectedPackFailedValidation {
+            folder_name,
+            reason,
+        } => format!(
+            "SelectedPackFailedValidation(folder_name={}, reason={})",
+            folder_name, reason
+        ),
         GameEvent::LocationLooked { location_id } => {
             format!("LocationLooked(location_id={})", location_id)
         }

@@ -58,10 +58,12 @@ pub enum SetupScreenAction {
     None,
     GenerateGame,
     LoadGame,
+    RefreshCartridges,
 }
 
 pub struct SetupScreenModel<'a> {
     pub selected_datapack: &'a mut String,
+    pub selected_datapack_label: String,
     pub difficulty: &'a mut f32,
     pub chaos_mode: &'a mut f32,
     pub fog_mode: &'a mut String,
@@ -70,6 +72,7 @@ pub struct SetupScreenModel<'a> {
     pub gpu_narrator_model: &'a mut String,
     pub datapacks: &'a DatapackCatalog,
     pub selected_record: Option<SelectedDatapackPreview>,
+    pub selected_invalid: Option<SelectedInvalidDatapackPreview>,
     pub header_image_path: Option<String>,
 }
 
@@ -101,6 +104,18 @@ pub struct SelectedDatapackPreview {
     pub boundary_response: Option<String>,
     pub dm_style_preview: Option<String>,
     pub world_tone_preview: Option<String>,
+    pub required_engine_version: Option<String>,
+    pub license: Option<String>,
+    pub attribution: Option<String>,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct SelectedInvalidDatapackPreview {
+    pub folder_name: String,
+    pub display_name: Option<String>,
+    pub version: Option<String>,
+    pub errors: Vec<String>,
 }
 
 pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> SetupScreenAction {
@@ -134,14 +149,30 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
                     ui.heading("Scenario Setup");
                     ui.label("Selected datapack");
                     egui::ComboBox::from_id_salt("datapack_select")
-                        .selected_text(model.selected_datapack.as_str())
+                        .selected_text(model.selected_datapack_label.as_str())
                         .show_ui(ui, |ui| {
+                            ui.label("Ready cartridges");
                             for record in &model.datapacks.valid {
                                 ui.selectable_value(
                                     model.selected_datapack,
-                                    record.summary.display_name.clone(),
-                                    &record.summary.display_name,
+                                    record.folder_name.clone(),
+                                    format!("{} [ready]", record.summary.display_name),
                                 );
+                            }
+                            if !model.datapacks.invalid.is_empty() {
+                                ui.separator();
+                                ui.label("Broken cartridges");
+                                for record in &model.datapacks.invalid {
+                                    let label = record
+                                        .display_name
+                                        .as_deref()
+                                        .unwrap_or(record.folder_name.as_str());
+                                    ui.selectable_value(
+                                        model.selected_datapack,
+                                        record.folder_name.clone(),
+                                        format!("{label} [broken]"),
+                                    );
+                                }
                             }
                         });
 
@@ -170,6 +201,41 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
                             record.media_reference_count,
                             record.sensory_template_count
                         ));
+                        if let Some(required_engine_version) = &record.required_engine_version {
+                            ui.small(format!(
+                                "Required console/API version: {}",
+                                required_engine_version
+                            ));
+                        }
+                        if !record.capabilities.is_empty() {
+                            ui.small(format!(
+                                "Capabilities: {}",
+                                record.capabilities.join(", ")
+                            ));
+                        }
+                        if let Some(license) = &record.license {
+                            ui.small(format!("License: {}", license));
+                        }
+                        if let Some(attribution) = &record.attribution {
+                            ui.small(format!("Attribution: {}", attribution));
+                        }
+                    } else if let Some(invalid) = &model.selected_invalid {
+                        ui.add_space(8.0);
+                        let label = invalid
+                            .display_name
+                            .as_deref()
+                            .unwrap_or(invalid.folder_name.as_str());
+                        ui.colored_label(
+                            egui::Color32::from_rgb(180, 40, 40),
+                            format!("{} cannot boot.", label),
+                        );
+                        ui.small(format!("Folder: {}", invalid.folder_name));
+                        if let Some(version) = &invalid.version {
+                            ui.small(format!("Manifest version: {}", version));
+                        }
+                        for error in &invalid.errors {
+                            ui.small(format!("- {}", error));
+                        }
                     }
 
                     ui.add_space(8.0);
@@ -243,17 +309,26 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
                 ui.group(|ui| {
                     ui.heading("Run Controls");
 
-                    let can_generate = model.selected_record.is_some();
+                    let has_boot_selection =
+                        model.selected_record.is_some() || model.selected_invalid.is_some();
                     if ui
-                        .add_enabled(can_generate, egui::Button::new("Generate Game"))
+                        .add_enabled(has_boot_selection, egui::Button::new("Start Scenario"))
                         .clicked()
                     {
                         action = SetupScreenAction::GenerateGame;
+                    }
+                    if model.selected_invalid.is_some() {
+                        ui.small(
+                            "Selected cartridge failed validation. Start Scenario will refuse to boot it.",
+                        );
                     }
 
                     ui.horizontal(|ui| {
                         if ui.button("Load Game").clicked() {
                             action = SetupScreenAction::LoadGame;
+                        }
+                        if ui.button("Refresh Cartridges").clicked() {
+                            action = SetupScreenAction::RefreshCartridges;
                         }
                         ui.add_enabled(false, egui::Button::new("Advanced Generation"));
                     });
@@ -290,7 +365,12 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
         });
 
         ui.add_space(16.0);
-        show_datapack_status(ui, model.datapacks, model.selected_record.as_ref());
+        show_datapack_status(
+            ui,
+            model.datapacks,
+            model.selected_record.as_ref(),
+            model.selected_invalid.as_ref(),
+        );
         ui.add_space(10.0);
         ui.label("`v0.1` keeps setup lean on purpose: choose the run shape, then drop straight into the deterministic shell.");
     });
@@ -983,7 +1063,16 @@ pub fn show_diagnostics_tab(ctx: &egui::Context, report: &DiagnosticReport) {
             ui.separator();
             ui.label("Invalid datapacks");
             for invalid in &summary.invalid_datapack_rows {
-                ui.small(format!("{}:", invalid.folder_name));
+                let label = invalid
+                    .display_name
+                    .as_deref()
+                    .unwrap_or(invalid.folder_name.as_str());
+                let version = invalid
+                    .version
+                    .as_deref()
+                    .map(|version| format!(" v{}", version))
+                    .unwrap_or_default();
+                ui.small(format!("{}{} ({})", label, version, invalid.folder_name));
                 for error in &invalid.errors {
                     ui.small(format!("- {}", error));
                 }
@@ -1577,15 +1666,24 @@ fn show_datapack_status(
     ui: &mut egui::Ui,
     datapacks: &DatapackCatalog,
     selected_record: Option<&SelectedDatapackPreview>,
+    selected_invalid: Option<&SelectedInvalidDatapackPreview>,
 ) {
     ui.group(|ui| {
-        ui.heading("Datapack Status");
+        ui.heading("Cartridge Status");
         ui.label(format!(
-            "Valid datapacks discovered: {}",
+            "Ready cartridges discovered: {}",
             datapacks.valid.len()
+        ));
+        ui.small(format!(
+            "Broken cartridges discovered: {}",
+            datapacks.invalid.len()
         ));
 
         if let Some(record) = selected_record {
+            ui.colored_label(
+                egui::Color32::from_rgb(40, 140, 70),
+                "Selected cartridge: ready.",
+            );
             if let Some(boundary) = &record.boundary_response {
                 ui.small(format!("Boundary response preview: {}", boundary));
             }
@@ -1601,6 +1699,19 @@ fn show_datapack_status(
             if let Some(world_tone) = &record.world_tone_preview {
                 ui.small(format!("World tone preview: {}", world_tone));
             }
+        } else if let Some(invalid) = selected_invalid {
+            ui.colored_label(
+                egui::Color32::from_rgb(180, 40, 40),
+                "Selected cartridge: failed validation.",
+            );
+            let label = invalid
+                .display_name
+                .as_deref()
+                .unwrap_or(invalid.folder_name.as_str());
+            ui.small(format!("Label: {}", label));
+            for error in &invalid.errors {
+                ui.small(format!("- {}", error));
+            }
         }
 
         if datapacks.invalid.is_empty() {
@@ -1609,7 +1720,16 @@ fn show_datapack_status(
             ui.separator();
             ui.label("Invalid datapacks");
             for invalid in &datapacks.invalid {
-                ui.small(format!("{}:", invalid.folder_name));
+                let label = invalid
+                    .display_name
+                    .as_deref()
+                    .unwrap_or(invalid.folder_name.as_str());
+                let version = invalid
+                    .version
+                    .as_deref()
+                    .map(|version| format!(" v{}", version))
+                    .unwrap_or_default();
+                ui.small(format!("{}{} ({})", label, version, invalid.folder_name));
                 for error in &invalid.errors {
                     ui.small(format!("- {}", error));
                 }

@@ -33,6 +33,13 @@ fn summarize_event(event: &GameEvent) -> Option<String> {
     match event {
         GameEvent::HelpShown => Some("Help was shown.".to_owned()),
         GameEvent::ActionRejected { reason } => Some(format!("Action rejected: {}", reason)),
+        GameEvent::SelectedPackFailedValidation {
+            folder_name,
+            reason,
+        } => Some(format!(
+            "Selected cartridge '{}' failed validation: {}.",
+            folder_name, reason
+        )),
         GameEvent::LocationLooked { location_id } => {
             Some(format!("Looked around location '{}'.", location_id))
         }

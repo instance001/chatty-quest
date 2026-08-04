@@ -392,6 +392,7 @@ fn select_media_focus(
             }
             GameEvent::HelpShown
             | GameEvent::ActionRejected { .. }
+            | GameEvent::SelectedPackFailedValidation { .. }
             | GameEvent::MovementBlocked { .. }
             | GameEvent::LocationUnlocked { .. }
             | GameEvent::LocationBarricaded { .. }
@@ -593,6 +594,18 @@ fn build_active_cues(
                     detail: format!(
                         "No media state change required, but tooling can still surface this reason: {}",
                         reason
+                    ),
+                });
+            }
+            GameEvent::SelectedPackFailedValidation {
+                folder_name,
+                reason,
+            } => {
+                cues.push(MediaCue {
+                    label: "Cartridge refused".to_owned(),
+                    detail: format!(
+                        "Selected cartridge '{}' failed validation: {}",
+                        folder_name, reason
                     ),
                 });
             }
@@ -905,6 +918,13 @@ fn build_future_hook_keys(
             GameEvent::RunLost => keys.push("event:run_lost".to_owned()),
             GameEvent::Waited { location_id } => keys.push(format!("event:wait:{}", location_id)),
             GameEvent::ActionRejected { .. } => keys.push("event:action_rejected".to_owned()),
+            GameEvent::SelectedPackFailedValidation { folder_name, .. } => {
+                keys.push("event:selected_pack_failed_validation".to_owned());
+                keys.push(format!(
+                    "event:selected_pack_failed_validation:{}",
+                    folder_name
+                ));
+            }
             GameEvent::HelpShown | GameEvent::AttackWhiff => {}
         }
     }

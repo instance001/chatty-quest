@@ -159,6 +159,13 @@ fn event_fact(event: &GameEvent) -> String {
     match event {
         GameEvent::HelpShown => "Help was shown.".to_owned(),
         GameEvent::ActionRejected { reason } => format!("Action rejected: {}.", reason),
+        GameEvent::SelectedPackFailedValidation {
+            folder_name,
+            reason,
+        } => format!(
+            "Selected pack failed validation: {} ({}).",
+            folder_name, reason
+        ),
         GameEvent::LocationLooked { location_id } => {
             format!("Location looked: {}.", location_id)
         }
@@ -310,6 +317,7 @@ fn brief_for_event(bundle: &DatapackBundle, event: &GameEvent) -> Option<String>
         GameEvent::NoiseAttractorShifted { location_id, .. } => location_brief(bundle, location_id),
         GameEvent::HelpShown
         | GameEvent::ActionRejected { .. }
+        | GameEvent::SelectedPackFailedValidation { .. }
         | GameEvent::MovementBlocked { .. }
         | GameEvent::LocationUnlocked { .. }
         | GameEvent::LocationBarricaded { .. }

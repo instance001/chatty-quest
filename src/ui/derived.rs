@@ -159,6 +159,8 @@ pub struct DiagnosticsSummaryModel {
 #[derive(Clone)]
 pub struct DiagnosticsInvalidPackRow {
     pub folder_name: String,
+    pub display_name: Option<String>,
+    pub version: Option<String>,
     pub errors: Vec<String>,
 }
 
@@ -667,6 +669,8 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
         .iter()
         .map(|invalid| DiagnosticsInvalidPackRow {
             folder_name: invalid.folder_name.clone(),
+            display_name: invalid.display_name.clone(),
+            version: invalid.version.clone(),
             errors: invalid.errors.clone(),
         })
         .collect();
