@@ -2,6 +2,35 @@ use std::path::{Path, PathBuf};
 
 const APP_ROOT_ENV: &str = "CHATTY_QUEST_BASE_PATH";
 
+pub const APP_LAYOUT_DIRS: &[&str] = &[
+    "assets",
+    "assets/datapacks",
+    "assets/ui",
+    "assets/ui/branding",
+    "assets/ui/screenshots",
+    "runtime",
+    "runtime/cache",
+    "runtime/config",
+    "runtime/exports",
+    "runtime/logs",
+    "runtime/saves",
+    "models",
+    "models/local",
+    "models/adapters",
+    "models/capsules",
+    "datasets",
+    "datasets/generated",
+    "datasets/templates",
+    "datasets/worldbuilding",
+    "handoff",
+    "handoff/chatty_cog/inbox",
+    "handoff/chatty_cog/outbox",
+    "handoff/chatty_art/requests",
+    "handoff/chatty_art/outputs",
+    "handoff/chatty_lora/style_refs",
+    "handoff/chatty_lora/outputs",
+];
+
 pub fn app_root() -> PathBuf {
     if let Some(path) = std::env::var_os(APP_ROOT_ENV)
         .map(PathBuf::from)
@@ -34,30 +63,11 @@ pub fn app_root() -> PathBuf {
 
 pub fn ensure_app_layout() -> std::io::Result<()> {
     let root = app_root();
-    for relative in [
-        "assets/datapacks",
-        "runtime",
-        "runtime/cache",
-        "runtime/config",
-        "runtime/exports",
-        "runtime/logs",
-        "runtime/saves",
-        "models",
-        "models/local",
-        "models/adapters",
-        "models/capsules",
-        "datasets",
-        "datasets/generated",
-        "datasets/templates",
-        "datasets/worldbuilding",
-        "handoff",
-        "handoff/chatty_cog/inbox",
-        "handoff/chatty_cog/outbox",
-        "handoff/chatty_art/requests",
-        "handoff/chatty_art/outputs",
-        "handoff/chatty_lora/style_refs",
-        "handoff/chatty_lora/outputs",
-    ] {
+    ensure_app_layout_at(&root)
+}
+
+pub fn ensure_app_layout_at(root: &Path) -> std::io::Result<()> {
+    for relative in APP_LAYOUT_DIRS {
         std::fs::create_dir_all(root.join(relative))?;
     }
     Ok(())
@@ -92,4 +102,32 @@ fn is_source_root(path: &Path) -> bool {
     path.join("Cargo.toml").exists()
         && path.join("src").join("main.rs").exists()
         && path.join("assets").join("datapacks").exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{APP_LAYOUT_DIRS, ensure_app_layout_at};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn ensure_app_layout_bootstraps_binary_first_run_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "chatty_quest_first_run_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+
+        ensure_app_layout_at(&root).expect("expected app layout creation to succeed");
+
+        for relative in APP_LAYOUT_DIRS {
+            assert!(
+                root.join(relative).is_dir(),
+                "missing first-run directory: {relative}"
+            );
+        }
+
+        std::fs::remove_dir_all(root).expect("expected temp app layout cleanup to succeed");
+    }
 }
