@@ -1,0 +1,8 @@
+[[objectives]]
+id = "clear_signal_box"
+name = "Clear The Signal Box"
+description = "Carry the brass token into the signal box and remove the ticket wraith from the route."
+tags = ["primary", "smoke_test"]
+target_boss_id = "ticket_wraith"
+required_item_id = "brass_token"
+required_location_id = "signal_box"

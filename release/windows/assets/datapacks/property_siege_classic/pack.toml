@@ -1,0 +1,6 @@
+id = "property_siege_classic"
+display_name = "Property Siege Classic"
+version = "0.1.0"
+author = "Chatty Quest"
+description = "A tight deterministic siege scenario: scavenge the house, survive the pressure, and kill the brute in the garage."
+primary_scenario = "property_siege_classic"

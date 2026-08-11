@@ -1,0 +1,14 @@
+[[enemies]]
+id = "static_guard"
+name = "Static Guard"
+description = "A person-shaped patch of radio hiss standing exactly where nobody should stand."
+narrator_brief = "Keep it minimal and uncanny, like interference learned posture."
+tags = ["static", "melee"]
+can_hear = false
+can_see = true
+hp = 1
+damage = 1
+retaliation_line = "The static guard answers with a dry burst of signal pain."
+defeat_line = "The static folds flat and becomes ordinary bad reception."
+inspect_alive_line = "Route read: this is a small blocker, not the scenario's real lock."
+inspect_defeated_line = "Route read: the platform path is clear of local interference."

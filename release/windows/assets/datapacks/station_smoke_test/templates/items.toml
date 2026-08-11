@@ -1,0 +1,10 @@
+[[items]]
+id = "brass_token"
+name = "Brass Token"
+description = "A warm little disc stamped with a platform number that no longer exists."
+narrator_brief = "Treat the token as mundane proof that the station remembers procedures nobody else does."
+tags = ["keepsake", "objective_item"]
+damage = 0
+inspect_lines = ["Use case: satisfies the smoke-test objective requirement."]
+objective_required_line = "Objective pressure: the token is the proof the signal box seems to want."
+pickup_line = "The brass token clicks into your palm like a tiny official verdict."

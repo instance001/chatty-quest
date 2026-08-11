@@ -1,0 +1,8 @@
+scenario_id = "station_smoke_test"
+starting_location = "station_platform"
+boundary_mode = "scenario_blocked"
+boundary_response = "The timetable refuses to acknowledge that direction."
+objective_mode = "single_frozen_objective"
+chaos_mode_note = "Keep the narration quiet, bureaucratic, and faintly unreal."
+spawned_enemy_movement_policy = "random"
+starter_hint_line = "Try commands like: look, take brass_token, go signal_box, attack, wait."

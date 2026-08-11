@@ -1,0 +1,6 @@
+id = "station_smoke_test"
+display_name = "Station Smoke Test"
+version = "0.1.0"
+author = "Chatty Quest"
+description = "A tiny non-siege datapack used to prove the RD Engine can load a different scenario family."
+primary_scenario = "station_smoke_test"
