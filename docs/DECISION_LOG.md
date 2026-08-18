@@ -68,7 +68,7 @@ Consequence:
 
 - map, inventory, HP, objectives, and combat outcomes must live in structured runtime state
 - narration becomes replaceable presentation instead of authority
-- future real model integration remains possible without surrendering control
+- future live model integration remains possible without surrendering control
 
 ### Decision: Descriptions Are Flavour, Fields Are Truth
 
@@ -172,7 +172,7 @@ Consequence:
 
 Context:
 
-The project wants future narrator replaceability, but the architecture must be proven before real LLM integration is attempted.
+The project wants future narrator replaceability, but the architecture must be proven before live LLM integration is attempted.
 
 Decision:
 

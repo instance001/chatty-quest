@@ -149,7 +149,7 @@ The narrator may not:
 - complete objectives directly
 - mutate any other authoritative state directly
 
-The narrator seam exists so a future real LLM can be added without replacing the engine's truth model.
+The narrator seam exists so a future live LLM can be added without replacing the engine's truth model.
 
 The command boundary before that seam is documented in `docs/COMMAND_BOUNDARY_SPEC.md`.
 
@@ -219,7 +219,7 @@ The project should reserve future seams without activating them in `v0.1`.
 
 Likely future seams include:
 
-- real LLM narrator adapters
+- live LLM narrator adapters
 - handoff lanes for Chatty-Cog orchestration
 - handoff lanes for Chatty-Art asset requests
 - handoff lanes for Chatty-Lora style consistency metadata

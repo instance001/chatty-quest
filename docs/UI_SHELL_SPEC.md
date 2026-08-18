@@ -209,7 +209,7 @@ Long-term example:
 - bookkeeper or summary helper on CPU
 - main chat narrator on GPU
 
-This is conceptually similar to the broader Chatty ecosystem split-brain model direction and belongs in setup rather than buried deep in active-run tabs.
+This is conceptually similar to the broader Chatty ecosystem dual-model runtime direction and belongs in setup rather than buried deep in active-run tabs.
 
 Important:
 

@@ -4,7 +4,7 @@
 
 This document defines the pre-LLM narrator contract for Chatty Quest and the RD Engine.
 
-The goal is not to connect a real model yet.
+The goal is not to connect a live model yet.
 
 The goal is to make sure every future narrator receives bounded, reducer-confirmed truth instead of raw mutable game internals or prose that it has to reinterpret.
 
@@ -24,7 +24,7 @@ The current branch introduces:
 
 These live in `src/game/narrator.rs`.
 
-`MockNarrator` now builds and consumes this context for action narration. That proves the seam before any real LLM adapter exists.
+`MockNarrator` now builds and consumes this context for action narration. That proves the seam before any live LLM adapter exists.
 
 Raw player text is resolved before this context is built. The command boundary is documented in [COMMAND_BOUNDARY_SPEC.md](COMMAND_BOUNDARY_SPEC.md).
 
@@ -110,7 +110,7 @@ The adapter may not produce:
 
 Do not add these yet:
 
-- real LLM API calls
+- live LLM API calls
 - prompt streaming
 - tool calls from the narrator
 - narrator-owned memory

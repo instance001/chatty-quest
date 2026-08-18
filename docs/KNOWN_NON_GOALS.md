@@ -16,7 +16,7 @@ If a future idea sounds exciting but does not help prove that promise, it probab
 
 `v0.1` does not implement:
 
-- real LLM calls
+- live LLM calls
 - hosted model APIs
 - autonomous world-authoring AI
 - narrator-owned game truth
@@ -25,7 +25,7 @@ If a future idea sounds exciting but does not help prove that promise, it probab
 
 Why:
 
-The first release proves the narrator seam through `MockNarrator`, not through live AI integration. The truth model must be valid before any real model is allowed near it.
+The first release proves the narrator seam through `MockNarrator`, not through live AI integration. The truth model must be valid before any live model is allowed near it.
 
 ## Chatty Ecosystem Non-Goals
 

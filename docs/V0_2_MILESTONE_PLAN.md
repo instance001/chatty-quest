@@ -200,7 +200,7 @@ Current branch status:
 
 Do not pull these in unless they become directly necessary:
 
-- real LLM integration
+- live LLM integration
 - multiplayer
 - Chatty-Cog runtime coordination
 - Chatty-Art generation requests
@@ -235,7 +235,7 @@ Current branch status:
 
 1. decide whether the next gain should be another authored content beat or a genuinely new system family
 2. prefer scenario-specific depth over broad abstraction unless the current pack is clearly blocked by missing engine shape
-3. keep any next authored beat deterministic and datapack-visible before any real LLM narrator or live ecosystem bridge work
+3. keep any next authored beat deterministic and datapack-visible before any live LLM narrator or live ecosystem bridge work
 
 Current implementation anchor:
 

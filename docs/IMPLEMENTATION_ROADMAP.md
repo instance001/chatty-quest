@@ -300,7 +300,7 @@ The exact Rust module names can evolve, but this dependency order should stay st
 
 The roadmap intentionally defers:
 
-- real LLM integration
+- live LLM integration
 - multiplayer and peer-to-peer coordination
 - live Chatty-Cog mediation
 - live Chatty-Art requests

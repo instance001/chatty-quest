@@ -128,7 +128,7 @@ The property itself is the playable map in `v0.1`. That is a scenario rule, not 
 
 `v0.1` deliberately excludes:
 
-- real LLM calls
+- live LLM calls
 - multiplayer
 - peer-to-peer networking
 - live Chatty ecosystem handoff

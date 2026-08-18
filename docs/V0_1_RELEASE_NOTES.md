@@ -68,7 +68,7 @@ Media credit:
 
 `v0.1` does not attempt to ship:
 
-- real LLM runtime integration
+- live LLM runtime integration
 - multiplayer
 - live Chatty ecosystem handoff
 - advanced procedural generation

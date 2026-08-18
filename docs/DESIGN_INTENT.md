@@ -361,7 +361,7 @@ The safe seed point is not a compromise with the vision. It is how we protect th
 `v0.1` should deliberately avoid:
 
 - pretending to be infinite
-- depending on real LLM calls
+- depending on live LLM calls
 - implementing future Chatty ecosystem handoffs
 - building advanced procedural systems before the core loop is fun
 - solving every future genre variant up front
