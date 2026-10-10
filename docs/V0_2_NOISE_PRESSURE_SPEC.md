@@ -90,12 +90,12 @@ Recommended minimum truth:
 - `turn_index: u64`
 - `noise_level: i32`
 - `noise_spawn_count: u32`
-- `spawned_enemy_targets: HashMap<String, String>`
-- `spawned_enemy_origins: HashMap<String, String>`
-- `spawned_enemy_searching: HashSet<String>`
-- `spawned_enemy_sight_targets: HashMap<String, String>`
-- `spawned_enemy_sight_subjects: HashMap<String, String>`
-- `spawned_enemy_sight_delays: HashMap<String, u8>`
+- `actor_noise_targets: HashMap<String, String>`
+- `actor_origins: HashMap<String, String>`
+- `actor_searching: HashSet<String>`
+- `actor_sight_targets: HashMap<String, String>`
+- `actor_sight_subjects: HashMap<String, String>`
+- `actor_sight_delays: HashMap<String, u8>`
 
 Enemy and boss templates expose sense flags:
 
@@ -290,8 +290,8 @@ Spawned enemies resolve their current attractor in one deterministic order.
 | Priority | Attractor | Gated by | Notes |
 | --- | --- | --- | --- |
 | 1 | Player sight | `can_see`, legal sightline, sight acquisition roll | Overrides an active noise target when acquired. |
-| 2 | Active sight track | Existing `spawned_enemy_sight_targets` state | Can be delayed by the sight chase delay rule; lost or failed sight drops into search. |
-| 3 | Noise target | `can_hear`, `spawned_enemy_targets` state | Fresh successful noisy actions can retarget hearing-capable spawned enemies. |
+| 2 | Active sight track | Existing `actor_sight_targets` state | Can be delayed by the sight chase delay rule; lost or failed sight drops into search. |
+| 3 | Noise target | `can_hear`, `actor_noise_targets` state | Fresh successful noisy actions can retarget hearing-capable spawned enemies. |
 | 4 | Search fallback | Search state and origin state | Waits, wanders, or returns toward origin when no stronger attractor is active. |
 
 Non-player sight is deliberately weaker than player sight. A spawned enemy can acquire another live enemy or boss by sight only when it is searching or not already committed to an active noise target.
@@ -366,14 +366,17 @@ Required behavior:
 
 - `noise_level` restores exactly
 - `noise_spawn_count` restores exactly
-- `spawned_enemy_targets` restores exactly
-- `spawned_enemy_origins` restores exactly
-- `spawned_enemy_searching` restores exactly
-- `spawned_enemy_sight_targets` restores exactly
-- `spawned_enemy_sight_subjects` restores exactly
-- `spawned_enemy_sight_delays` restores exactly
+- `actor_noise_targets` restores exactly
+- `actor_origins` restores exactly
+- `actor_searching` restores exactly
+- `actor_sight_targets` restores exactly
+- `actor_sight_subjects` restores exactly
+- `actor_sight_delays` restores exactly
 - broken-open gate state restores exactly
 - restored noise continues to affect subsequent reducer outcomes correctly
+
+Older saves that still serialize the former enemy-named blackboard keys are accepted on load and
+canonicalized into these actor-neutral fields. New saves emit only the actor-neutral names.
 
 ## Test Coverage
 

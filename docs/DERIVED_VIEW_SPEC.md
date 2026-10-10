@@ -46,6 +46,7 @@ Examples:
 
 - map tile layouts
 - media panel focus state
+- focused-context action suggestions
 - inventory display rows
 - character summary panels
 - diagnostics counters
@@ -73,6 +74,26 @@ Derived views should not consume:
 - temporary hover or selection state as canonical world truth
 - missing media as evidence that game state failed
 - guessed future outcomes
+
+## Focused Action Suggestions
+
+The Game action bar may use local UI focus to derive a small set of target-specific controls. The
+focus itself remains presentation state: selecting it does not act, alter control, or mutate an
+encounter. Its suggestions must be rebuilt from the current runtime actor, owned grants,
+inventory endpoints, capabilities, disposition, and life-state contracts.
+
+Current policy is intentionally conservative:
+
+- a focused hostile combatant can surface inspection, a direct attack, and player abilities whose
+  effect contracts accept that target;
+- a focused neutral or friendly actor can surface inspection, host-backed help, and only the item
+  hand-offs for which both live inventories are valid;
+- hostile social controls and impossible transfers are not surfaced;
+- when a direct focused attack is shown, the ambiguous generic `attack` fallback is omitted;
+- a button is a convenience command, never pre-approval: the reducer validates it again at use.
+
+This keeps the action bar useful without allowing UI enumeration to become a second legality
+system or to advertise parser verbs that make no current sense.
 
 ## Derived View Layers
 
@@ -108,6 +129,10 @@ Current implementation note:
 - shared row builders and cross-surface labels that feed more than one surface live under `src/game/derived.rs`
 - widget-specific models still live under their owning UI or diagnostics modules
 - this keeps repeated player-facing truth wording from drifting between the Game sidebar, Character tab, Diagnostics report, narrator context, and handoff snapshots
+
+For causal consumers, prefer the central `EventProjection` (`type | origin | impact | outcome`)
+over local exhaustive interpretation of `GameEvent` variants. Typed event payloads remain
+available for details, but a derived view must not recreate a competing account of what happened.
 
 ### 3. Widget Or Transport Surface
 

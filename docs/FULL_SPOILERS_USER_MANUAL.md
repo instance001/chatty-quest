@@ -1,6 +1,6 @@
 # Chatty Quest Full-Spoilers User Manual
 
-Last updated: `2026-07-28`
+Last updated: `2026-09-29`
 
 ## Spoiler Warning
 
@@ -27,6 +27,27 @@ Use it if you want:
 - an explicit walkthrough
 - exact item and route answers
 - boss and threat details
+
+## Narrator Setup And Free Text
+
+Setup supports `Off`, `Mock Narrator`, any detected GGUF in `models/local/`, and a hosted `BYO API
+Key` narrator. The hosted panel includes presets for OpenAI, xAI, Anthropic, Google Gemini, and a
+custom OpenAI-compatible endpoint. A preset fills suggested model and endpoint values, but players
+may edit them. API keys are masked, retained only in memory for the running app, and excluded from
+both `runtime/config/title_setup.json` and run saves.
+
+Title setup is restored between launches: pack, difficulty, chaos, fog, capsule, narrator backend,
+local model or BYO provider/model/endpoint, narration-event selections, generated-content choice,
+and play contract. A missing local model or pack falls back safely instead of blocking Setup.
+
+The command bar sends known commands through normal reducer validation. Unrecognized free text may
+receive narration without changing canonical state. On an eligible turn, the host can separately
+ask the narrator to fill one small, authorized proposal form. The player may edit the resulting card
+before accepting or rejecting it. Acceptance still requires host validation and a reducer commit.
+
+The narration-event checkboxes decide when narration happens. Proposal looseness is separate:
+Tight has a 0% host gate, Guided 25%, Loose 60%, and Wild 100% for eligible free-text turns. Wild
+widens the authorized host-owned form set; it never grants a narrator direct mutation authority.
 
 ## Current Scenario Overview
 
@@ -178,6 +199,30 @@ The Character tab can now spell out two useful deterministic summaries:
 
 - utility relevance, such as the `Torch` revealing connected exits or the `Barricade Kit` listing remaining barricade targets
 - siege security, including secured approaches, open approaches, finale-security payoff, and whether barricaded rooms can help noise settle
+
+## Abilities, Grants, and Necromancy
+
+The Character tab shows every ability you can currently use, including whether it is permanent,
+item-supplied, or temporary; how many uses remain; and the exact command form.
+
+- use an ability with `cast <ability> at <target>`
+- ask a present grant-owning actor to use one with `<actor>, cast <ability> at <target>`
+- successful casts award XP into the ability's named pool
+- when enough XP is available, press `Learn` beside an available unlock (or type `learn <ability>`)
+- a finite item grant travels with its exact item instance, so handing over or dropping that item also moves access
+
+The scenario starts with `Grave Bolt`. The laundry contains a `Salt-Stained Scroll` that grants one
+use of `Spectral Spark`; take it, return to a hostile location, then use
+`cast spectral_spark at <target>`. A spent grant does not change the global ability template or
+anyone else's copy.
+
+## Targeted Combat
+
+`attack` uses the normal valid hostile target in your current location. Use
+`attack <target>` or `hit <target>` when more than one hostile is present and you want to direct
+the controlled actor at one particular target. The named target is validated by the reducer; a
+missing, non-hostile, or unattackable actor does not take damage and narration must not claim a
+hit.
 
 ## Noise, Fully Explained
 

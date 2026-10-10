@@ -6,10 +6,14 @@ use std::path::{Path, PathBuf};
 use crate::app_paths;
 
 const DATAPACKS_ROOT: &str = "assets/datapacks";
-const DATAPACK_SCHEMA_VERSION: &str = "v0.1-toml-templates-2";
+const DATAPACK_SCHEMA_VERSION: &str = "v0.1-toml-templates-3";
 
 fn default_true() -> bool {
     true
+}
+
+fn default_hp_per_skill_level() -> u32 {
+    1
 }
 
 fn default_sight_acquire_chance_percent() -> u8 {
@@ -26,6 +30,18 @@ fn default_spawned_hazard_break_chance_percent() -> u8 {
 
 fn default_spawned_enemy_movement_policy() -> String {
     "random".to_owned()
+}
+
+fn default_narration_usage() -> String {
+    "optional".to_owned()
+}
+
+fn default_narration_routine_route() -> String {
+    "mock".to_owned()
+}
+
+fn default_narration_selected_route() -> String {
+    "selected_narrator".to_owned()
 }
 
 #[derive(Clone, Debug)]
@@ -80,8 +96,10 @@ pub struct DatapackBundle {
     pub rules: RulesToml,
     pub locations: Vec<LocationTemplate>,
     pub items: Vec<ItemTemplate>,
+    pub npcs: Vec<NpcTemplate>,
     pub enemies: Vec<EnemyTemplate>,
     pub bosses: Vec<BossTemplate>,
+    pub abilities: Vec<AbilityTemplate>,
     pub objectives: Vec<ObjectiveTemplate>,
     pub dm_style: Option<String>,
     pub world_tone: Option<String>,
@@ -94,6 +112,10 @@ pub struct MediaReferences {
     pub video: Option<String>,
     pub audio: Option<String>,
     pub display_role: Option<String>,
+    /// Optional semantic pool selectors. They are presentation-only and may be shared by
+    /// authored and runtime-proposed entities when no exact asset is pinned.
+    #[serde(default)]
+    pub pool_tags: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -130,6 +152,22 @@ pub struct RulesToml {
     pub boundary_response: Option<String>,
     pub objective_mode: String,
     pub chaos_mode_note: Option<String>,
+    /// Empty means every engine preset is available. Packs can narrow this list without
+    /// changing how a save records admitted truth.
+    #[serde(default)]
+    pub allowed_play_presets: Vec<String>,
+    #[serde(default)]
+    pub protected_invariants: Vec<String>,
+    /// Player access is data, rather than a special player-only skill tree. Ability templates
+    /// query these tags when a grant is used or unlocked.
+    #[serde(default)]
+    pub player_tags: Vec<String>,
+    #[serde(default)]
+    pub starter_ability_ids: Vec<String>,
+    /// Automatic durable survivability earned for each authored progression milestone crossed.
+    /// This is a pack balance rule, not a separate vitality skill tree.
+    #[serde(default = "default_hp_per_skill_level")]
+    pub hp_per_skill_level: u32,
     #[serde(default = "default_sight_acquire_chance_percent")]
     pub sight_acquire_chance_percent: u8,
     #[serde(default = "default_sight_chase_delay_chance_percent")]
@@ -152,6 +190,42 @@ pub struct RulesToml {
     pub finale_security_secured_line: Option<String>,
     #[serde(default)]
     pub finale_security_unsecured_line: Option<String>,
+    #[serde(default)]
+    pub narration: NarrationRules,
+}
+
+/// Pack-owned presentation policy. These routes choose a presentation service after the reducer
+/// has committed its result; they never grant a narrator authority over runtime truth.
+#[derive(Clone, Debug, Deserialize)]
+pub struct NarrationRules {
+    #[serde(default = "default_narration_usage")]
+    pub usage: String,
+    #[serde(default = "default_narration_routine_route")]
+    pub routine: String,
+    #[serde(default = "default_narration_selected_route")]
+    pub notable: String,
+    #[serde(default = "default_narration_selected_route")]
+    pub major: String,
+    #[serde(default = "default_narration_selected_route")]
+    pub critical: String,
+    #[serde(default = "default_narration_selected_route")]
+    pub inspection: String,
+    #[serde(default = "default_narration_selected_route")]
+    pub summary: String,
+}
+
+impl Default for NarrationRules {
+    fn default() -> Self {
+        Self {
+            usage: default_narration_usage(),
+            routine: default_narration_routine_route(),
+            notable: default_narration_selected_route(),
+            major: default_narration_selected_route(),
+            critical: default_narration_selected_route(),
+            inspection: default_narration_selected_route(),
+            summary: default_narration_selected_route(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -236,6 +310,8 @@ pub struct LocationTemplate {
     #[serde(default)]
     pub items: Vec<String>,
     #[serde(default)]
+    pub npcs: Vec<String>,
+    #[serde(default)]
     pub enemies: Vec<String>,
     #[serde(default)]
     pub bosses: Vec<String>,
@@ -252,6 +328,9 @@ pub struct ItemTemplate {
     pub media: MediaReferences,
     #[serde(default)]
     pub damage: i32,
+    /// World-time cost when this item supplies the controlled actor's basic attack.
+    #[serde(default = "default_action_cost")]
+    pub attack_cost: u64,
     #[serde(default)]
     pub utility_effect: Option<String>,
     #[serde(default)]
@@ -266,6 +345,84 @@ pub struct ItemTemplate {
     pub utility_success_line: Option<String>,
     #[serde(default)]
     pub utility_empty_line: Option<String>,
+    #[serde(default)]
+    pub actor: Option<ActorCapabilitiesTemplate>,
+    /// Host-owned mechanics selected by this template. `behavior_tags` remains an input alias
+    /// for older packs, but new packs must use this explicit capability vocabulary.
+    #[serde(default, alias = "behavior_tags")]
+    pub capabilities: Vec<String>,
+    /// Item-owned ability copies (scrolls, charged staves, etc.). The referenced ability remains
+    /// immutable pack data; only the generated grant gets mutable charges and expiry.
+    #[serde(default)]
+    pub ability_grants: Vec<AbilityGrantTemplate>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct AbilityGrantTemplate {
+    pub template_id: String,
+    #[serde(default)]
+    pub remaining_uses: Option<u32>,
+    #[serde(default)]
+    pub duration_turns: Option<u64>,
+}
+
+/// Shared actor capability assignment.  Template kinds opt into this component; the reducer
+/// remains the only owner of runtime behavior.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ActorCapabilitiesTemplate {
+    #[serde(default)]
+    pub hp: Option<i32>,
+    #[serde(default)]
+    pub damage: Option<i32>,
+    #[serde(default)]
+    pub can_hear: bool,
+    #[serde(default)]
+    pub can_see: bool,
+    #[serde(default)]
+    pub can_move: bool,
+    #[serde(default)]
+    pub combat: bool,
+    /// World-time cost for the actor's normal traversal.
+    #[serde(default = "default_action_cost")]
+    pub traversal_cost: u64,
+    /// World-time cost for the actor's native/basic attack.
+    #[serde(default = "default_action_cost")]
+    pub attack_cost: u64,
+    /// Explicit actor disposition for template families that do not already have one at the
+    /// template root. It controls hostility, not whether combat state exists.
+    #[serde(default = "default_npc_disposition")]
+    pub disposition: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct NpcTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub narrator_brief: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub media: MediaReferences,
+    #[serde(default = "default_npc_disposition")]
+    pub disposition: String,
+    #[serde(default)]
+    pub faction: String,
+    #[serde(default)]
+    pub quest_objective_ids: Vec<String>,
+    #[serde(default)]
+    pub actor: ActorCapabilitiesTemplate,
+    #[serde(default, alias = "behavior_tags")]
+    pub capabilities: Vec<String>,
+}
+
+fn default_npc_disposition() -> String {
+    "neutral".to_owned()
+}
+
+const fn default_action_cost() -> u64 {
+    1
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -283,6 +440,10 @@ pub struct EnemyTemplate {
     pub media: MediaReferences,
     pub hp: i32,
     pub damage: i32,
+    #[serde(default = "default_action_cost")]
+    pub traversal_cost: u64,
+    #[serde(default = "default_action_cost")]
+    pub attack_cost: u64,
     #[serde(default)]
     pub retaliation_line: Option<String>,
     #[serde(default)]
@@ -291,6 +452,10 @@ pub struct EnemyTemplate {
     pub inspect_alive_line: Option<String>,
     #[serde(default)]
     pub inspect_defeated_line: Option<String>,
+    /// Empty preserves legacy enemy behavior. When supplied, these host capability selections
+    /// explicitly choose shared pool/tracking mechanics for this template.
+    #[serde(default, alias = "behavior_tags")]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -308,6 +473,10 @@ pub struct BossTemplate {
     pub media: MediaReferences,
     pub hp: i32,
     pub damage: i32,
+    #[serde(default = "default_action_cost")]
+    pub traversal_cost: u64,
+    #[serde(default = "default_action_cost")]
+    pub attack_cost: u64,
     #[serde(default)]
     pub wounded_phase_hp_threshold: Option<i32>,
     #[serde(default)]
@@ -328,6 +497,134 @@ pub struct BossTemplate {
     pub wounded_phase_inspect_pending: Option<String>,
     #[serde(default)]
     pub wounded_phase_inspect_defeated: Option<String>,
+    /// Bosses remain placed encounters by default. Host capability selections opt a boss into
+    /// shared movement/pool behavior when a pack deliberately requests it.
+    #[serde(default, alias = "behavior_tags")]
+    pub capabilities: Vec<String>,
+}
+
+/// An immutable reusable action definition. Mutable charges, owner, expiry and acquisition live
+/// in runtime `AbilityGrant`s, never in this shared template.
+#[derive(Clone, Debug, Deserialize)]
+pub struct AbilityTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub required_tags: Vec<String>,
+    pub progress_pool: String,
+    #[serde(default)]
+    pub required_xp: i32,
+    #[serde(default)]
+    pub xp_on_success: i32,
+    /// Whether this template participates in the controlled player's XP unlock tree. A scroll,
+    /// staff charge, or encounter-only ability may still be granted and cast when false.
+    #[serde(default = "default_true")]
+    pub learnable: bool,
+    /// Whether this template may be made permanent by studying a matching concrete item source.
+    /// This is independent from direct XP unlockability.
+    #[serde(default = "default_true")]
+    pub scroll_learnable: bool,
+    /// Tags of scroll-held templates this permanent ability lets its owner study. This is a
+    /// passive progression contract; it does not create a separate noun-specific skill system.
+    #[serde(default)]
+    pub scroll_learning_tags: Vec<String>,
+    /// `None` is an innate/permanent grant. A finite value belongs to each grant instance.
+    #[serde(default)]
+    pub default_uses: Option<u32>,
+    #[serde(default)]
+    pub duration_turns: Option<u64>,
+    /// Absolute readiness is retained by each owned grant. Zero means the template has no
+    /// cooldown beyond ordinary action timing.
+    #[serde(default)]
+    pub cooldown_turns: u64,
+    /// Cost paid against the common actor readiness clock on a successful cast. This is
+    /// intentionally independent of `cooldown_turns`.
+    #[serde(default = "default_action_cost")]
+    pub action_cost: u64,
+    /// Passive templates (for example, scroll literacy) have no cast effect but may still grant
+    /// host-owned permissions through their other declarative fields.
+    #[serde(default)]
+    pub effect: Option<AbilityEffect>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AbilityEffect {
+    Damage {
+        amount: i32,
+    },
+    Healing {
+        amount: i32,
+        /// Ordinary healing is an alive-target effect. Extra tags let content narrow that
+        /// contract (for example, `organic` or `ally`) without creating a second healing path.
+        #[serde(default)]
+        required_target_tags: Vec<String>,
+    },
+    /// Reversible incapacity is deliberately distinct from ordinary healing. A revival effect
+    /// must opt into a dead-target contract and is the only effect allowed to restore zero HP.
+    Revive {
+        amount: i32,
+        required_target_tags: Vec<String>,
+    },
+    /// Moves the casting actor through the ordinary actor-movement reducer. The cast target is
+    /// the requested destination; this deliberately does not create a spell-specific movement
+    /// state path or bypass authored route validation.
+    Move,
+    RevealConnections,
+    /// A reusable actor-owned modifier consumed by the existing status-effect evaluator. It is
+    /// not a spell-only buff system: any ability source can establish the same host contract.
+    Status {
+        trigger: AbilityStatusTrigger,
+        duration: AbilityStatusDuration,
+        #[serde(default)]
+        additive_damage: i32,
+        #[serde(default)]
+        additive_healing: i32,
+        #[serde(default)]
+        timing_cost_delta: i64,
+        #[serde(default)]
+        timing_action_kinds: Vec<crate::game::state::ActionTimingKind>,
+        #[serde(default)]
+        blocked_action_kinds: Vec<crate::game::state::ActionTimingKind>,
+        #[serde(default)]
+        required_target_tags: Vec<String>,
+        #[serde(default)]
+        required_context_tags: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbilityStatusTrigger {
+    Combat,
+    Movement,
+    Inspect,
+    Wait,
+    Failure,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbilityStatusDuration {
+    Scene,
+    Run,
+    UntilUsed,
+}
+
+impl AbilityEffect {
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Damage { .. } => "damage",
+            Self::Healing { .. } => "healing",
+            Self::Revive { .. } => "revival",
+            Self::Move => "movement",
+            Self::RevealConnections => "discovery",
+            Self::Status { .. } => "status",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -351,6 +648,11 @@ struct ItemFile {
     items: Vec<ItemTemplate>,
 }
 
+#[derive(Default, Deserialize)]
+struct NpcFile {
+    npcs: Vec<NpcTemplate>,
+}
+
 #[derive(Deserialize)]
 struct EnemyFile {
     enemies: Vec<EnemyTemplate>,
@@ -359,6 +661,11 @@ struct EnemyFile {
 #[derive(Deserialize)]
 struct BossFile {
     bosses: Vec<BossTemplate>,
+}
+
+#[derive(Default, Deserialize)]
+struct AbilityFile {
+    abilities: Vec<AbilityTemplate>,
 }
 
 #[derive(Deserialize)]
@@ -498,6 +805,12 @@ fn load_datapack_bundle_from_path(
         "templates/items.toml",
         &mut errors,
     );
+    let npcs = parse_optional_toml_file::<NpcFile>(
+        &templates_dir.join("npcs.toml"),
+        "templates/npcs.toml",
+        &mut errors,
+    )
+    .unwrap_or_default();
     let enemies = parse_toml_file::<EnemyFile>(
         &templates_dir.join("enemies.toml"),
         "templates/enemies.toml",
@@ -508,6 +821,12 @@ fn load_datapack_bundle_from_path(
         "templates/bosses.toml",
         &mut errors,
     );
+    let abilities = parse_optional_toml_file::<AbilityFile>(
+        &templates_dir.join("abilities.toml"),
+        "templates/abilities.toml",
+        &mut errors,
+    )
+    .unwrap_or_default();
     let objectives = parse_toml_file::<ObjectiveFile>(
         &templates_dir.join("objectives.toml"),
         "templates/objectives.toml",
@@ -541,6 +860,49 @@ fn load_datapack_bundle_from_path(
             && note.trim().is_empty()
         {
             errors.push("rules.toml chaos_mode_note must not be blank when present.".to_owned());
+        }
+        for preset in &rules.allowed_play_presets {
+            if !matches!(
+                preset.trim(),
+                "simulation" | "rules_first" | "adventure" | "chaos" | "unleashed"
+            ) {
+                errors.push(format!(
+                    "rules.toml allowed_play_presets contains unsupported preset '{}'.",
+                    preset
+                ));
+            }
+        }
+        if rules
+            .protected_invariants
+            .iter()
+            .any(|invariant| invariant.trim().is_empty())
+        {
+            errors
+                .push("rules.toml protected_invariants must not contain blank values.".to_owned());
+        }
+        if !matches!(
+            rules.narration.usage.trim(),
+            "unused" | "optional" | "recommended" | "required"
+        ) {
+            errors.push(format!(
+                "rules.toml narration.usage '{}' must be unused, optional, recommended, or required.",
+                rules.narration.usage
+            ));
+        }
+        for (hook, route) in [
+            ("routine", &rules.narration.routine),
+            ("notable", &rules.narration.notable),
+            ("major", &rules.narration.major),
+            ("critical", &rules.narration.critical),
+            ("inspection", &rules.narration.inspection),
+            ("summary", &rules.narration.summary),
+        ] {
+            if !matches!(route.trim(), "none" | "mock" | "selected_narrator") {
+                errors.push(format!(
+                    "rules.toml narration.{hook} route '{}' must be none, mock, or selected_narrator.",
+                    route
+                ));
+            }
         }
 
         validate_percent(
@@ -735,6 +1097,29 @@ fn load_datapack_bundle_from_path(
         validate_unique_ids("items", &items.items, &mut errors);
         validate_non_blank_names("items", &items.items, &mut errors);
         for item in &items.items {
+            if item.attack_cost == 0 {
+                errors.push(format!(
+                    "Item '{}' attack_cost must be greater than 0.",
+                    item.id
+                ));
+            }
+            if let Some(actor) = &item.actor {
+                validate_actor_capabilities("Item", &item.id, actor, &mut errors);
+            }
+            validate_capability_selection(
+                "Item",
+                &item.id,
+                &item.capabilities,
+                item.actor.as_ref().is_some_and(|actor| actor.can_hear),
+                item.actor.as_ref().is_some_and(|actor| actor.can_see),
+                item.actor.as_ref().is_some_and(|actor| actor.can_move),
+                item.actor.is_some(),
+                item.actor.as_ref().is_some_and(|actor| actor.hp.is_some()),
+                item.actor
+                    .as_ref()
+                    .is_some_and(|actor| actor.damage.is_some()),
+                &mut errors,
+            );
             if let Some(utility_effect) = item.utility_effect.as_deref() {
                 match utility_effect.trim() {
                     "reveal_connections" | "barricade" => {}
@@ -780,10 +1165,58 @@ fn load_datapack_bundle_from_path(
             }
         }
     }
+    validate_unique_ids("npcs", &npcs.npcs, &mut errors);
+    validate_non_blank_names("npcs", &npcs.npcs, &mut errors);
+    for npc in &npcs.npcs {
+        if !matches!(npc.disposition.trim(), "friendly" | "neutral" | "hostile") {
+            errors.push(format!(
+                "NPC '{}' has unsupported disposition '{}'; use friendly, neutral, or hostile.",
+                npc.id, npc.disposition
+            ));
+        }
+        validate_actor_capabilities("NPC", &npc.id, &npc.actor, &mut errors);
+        validate_capability_selection(
+            "NPC",
+            &npc.id,
+            &npc.capabilities,
+            npc.actor.can_hear,
+            npc.actor.can_see,
+            npc.actor.can_move,
+            true,
+            npc.actor.hp.is_some(),
+            npc.actor.damage.is_some(),
+            &mut errors,
+        );
+        if npc.actor.combat && npc.actor.hp.is_none() {
+            errors.push(format!(
+                "NPC '{}' enables actor.combat but does not define actor.hp.",
+                npc.id
+            ));
+        }
+    }
     if let Some(enemies) = &enemies {
         validate_unique_ids("enemies", &enemies.enemies, &mut errors);
         validate_non_blank_names("enemies", &enemies.enemies, &mut errors);
         for enemy in &enemies.enemies {
+            validate_action_costs(
+                "Enemy",
+                &enemy.id,
+                enemy.traversal_cost,
+                enemy.attack_cost,
+                &mut errors,
+            );
+            validate_capability_selection(
+                "Enemy",
+                &enemy.id,
+                &enemy.capabilities,
+                enemy.can_hear,
+                enemy.can_see,
+                true,
+                true,
+                true,
+                true,
+                &mut errors,
+            );
             for (field_name, value) in [
                 ("retaliation_line", enemy.retaliation_line.as_deref()),
                 ("defeat_line", enemy.defeat_line.as_deref()),
@@ -808,6 +1241,25 @@ fn load_datapack_bundle_from_path(
         validate_unique_ids("bosses", &bosses.bosses, &mut errors);
         validate_non_blank_names("bosses", &bosses.bosses, &mut errors);
         for boss in &bosses.bosses {
+            validate_action_costs(
+                "Boss",
+                &boss.id,
+                boss.traversal_cost,
+                boss.attack_cost,
+                &mut errors,
+            );
+            validate_capability_selection(
+                "Boss",
+                &boss.id,
+                &boss.capabilities,
+                boss.can_hear,
+                boss.can_see,
+                true,
+                true,
+                true,
+                true,
+                &mut errors,
+            );
             if let Some(threshold) = boss.wounded_phase_hp_threshold {
                 if threshold <= 0 {
                     errors.push(format!(
@@ -870,6 +1322,185 @@ fn load_datapack_bundle_from_path(
     if let Some(objectives) = &objectives {
         validate_unique_ids("objectives", &objectives.objectives, &mut errors);
         validate_non_blank_names("objectives", &objectives.objectives, &mut errors);
+    }
+
+    let ability_ids = abilities
+        .abilities
+        .iter()
+        .map(|ability| ability.id.as_str())
+        .collect::<HashSet<_>>();
+    if ability_ids.len() != abilities.abilities.len() {
+        errors.push("templates/abilities.toml contains duplicate ability ids.".to_owned());
+    }
+    for ability in &abilities.abilities {
+        if ability.id.trim().is_empty()
+            || ability.name.trim().is_empty()
+            || ability.description.trim().is_empty()
+            || ability.progress_pool.trim().is_empty()
+        {
+            errors.push(
+                "Ability templates require non-empty id, name, description, and progress_pool."
+                    .to_owned(),
+            );
+        }
+        if ability.required_xp < 0 || ability.xp_on_success < 0 {
+            errors.push(format!(
+                "Ability '{}' XP values must not be negative.",
+                ability.id
+            ));
+        }
+        if ability.default_uses == Some(0) {
+            errors.push(format!(
+                "Ability '{}' default_uses must be positive when defined.",
+                ability.id
+            ));
+        }
+        if ability.action_cost == 0 {
+            errors.push(format!(
+                "Ability '{}' action_cost must be greater than 0.",
+                ability.id
+            ));
+        }
+        if ability.duration_turns == Some(0) {
+            errors.push(format!(
+                "Ability '{}' duration_turns must be positive when defined.",
+                ability.id
+            ));
+        }
+        if ability
+            .tags
+            .iter()
+            .chain(ability.required_tags.iter())
+            .chain(ability.scroll_learning_tags.iter())
+            .any(|tag| tag.trim().is_empty())
+        {
+            errors.push(format!("Ability '{}' tags must not be blank.", ability.id));
+        }
+        let effect_tags = match ability.effect.as_ref() {
+            Some(AbilityEffect::Healing {
+                required_target_tags,
+                ..
+            })
+            | Some(AbilityEffect::Revive {
+                required_target_tags,
+                ..
+            }) => required_target_tags.as_slice(),
+            Some(AbilityEffect::Status {
+                required_target_tags,
+                required_context_tags,
+                ..
+            }) if required_target_tags
+                .iter()
+                .chain(required_context_tags.iter())
+                .any(|tag| tag.trim().is_empty()) =>
+            {
+                errors.push(format!(
+                    "Ability '{}' status tags must not be blank.",
+                    ability.id
+                ));
+                &[]
+            }
+            _ => &[],
+        };
+        if effect_tags.iter().any(|tag| tag.trim().is_empty()) {
+            errors.push(format!(
+                "Ability '{}' target tags must not be blank.",
+                ability.id
+            ));
+        }
+        if ability.effect.is_none() && ability.scroll_learning_tags.is_empty() {
+            errors.push(format!(
+                "Ability '{}' must define a cast effect or a passive capability contract.",
+                ability.id
+            ));
+        }
+        match ability.effect.as_ref() {
+            Some(
+                AbilityEffect::Damage { amount }
+                | AbilityEffect::Healing { amount, .. }
+                | AbilityEffect::Revive { amount, .. },
+            ) if *amount <= 0 => {
+                errors.push(format!(
+                    "Ability '{}' effect amount must be positive.",
+                    ability.id
+                ));
+            }
+            Some(AbilityEffect::Revive {
+                required_target_tags,
+                ..
+            }) if !required_target_tags
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case("dead")) =>
+            {
+                errors.push(format!(
+                    "Ability '{}' revival effect must require the 'dead' target tag.",
+                    ability.id
+                ));
+            }
+            Some(AbilityEffect::Status {
+                additive_damage,
+                additive_healing,
+                timing_cost_delta,
+                timing_action_kinds,
+                blocked_action_kinds,
+                ..
+            }) if *additive_damage == 0
+                && *additive_healing == 0
+                && *timing_cost_delta == 0
+                && timing_action_kinds.is_empty()
+                && blocked_action_kinds.is_empty() =>
+            {
+                errors.push(format!(
+                    "Ability '{}' status effect must modify damage, healing, or action timing.",
+                    ability.id
+                ));
+            }
+            Some(AbilityEffect::Status {
+                timing_cost_delta,
+                timing_action_kinds,
+                ..
+            }) if *timing_cost_delta != 0 && timing_action_kinds.is_empty() => {
+                errors.push(format!(
+                    "Ability '{}' status timing_cost_delta requires timing_action_kinds.",
+                    ability.id
+                ));
+            }
+            _ => {}
+        }
+    }
+    if let Some(items) = &items {
+        for item in &items.items {
+            for grant in &item.ability_grants {
+                if !ability_ids.contains(grant.template_id.as_str()) {
+                    errors.push(format!(
+                        "Item '{}' references unknown ability template '{}'.",
+                        item.id, grant.template_id
+                    ));
+                }
+                if grant.remaining_uses == Some(0) {
+                    errors.push(format!(
+                        "Item '{}' ability grant '{}' remaining_uses must be positive when defined.",
+                        item.id, grant.template_id
+                    ));
+                }
+                if grant.duration_turns == Some(0) {
+                    errors.push(format!(
+                        "Item '{}' ability grant '{}' duration_turns must be positive when defined.",
+                        item.id, grant.template_id
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(rules) = &rules {
+        for ability_id in &rules.starter_ability_ids {
+            if !ability_ids.contains(ability_id.as_str()) {
+                errors.push(format!(
+                    "rules.toml starter_ability_ids references unknown ability '{}'.",
+                    ability_id
+                ));
+            }
+        }
     }
 
     if let (Some(rules), Some(locations)) = (&rules, &locations) {
@@ -1013,6 +1644,20 @@ fn load_datapack_bundle_from_path(
                     errors.push(format!(
                         "Location '{}' references unknown item '{}'.",
                         location.id, item_id
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(locations) = &locations {
+        let known_npcs: HashSet<&str> = npcs.npcs.iter().map(|entry| entry.id.as_str()).collect();
+        for location in &locations.locations {
+            for npc_id in &location.npcs {
+                if !known_npcs.contains(npc_id.as_str()) {
+                    errors.push(format!(
+                        "Location '{}' references unknown NPC '{}'.",
+                        location.id, npc_id
                     ));
                 }
             }
@@ -1167,6 +1812,24 @@ fn load_datapack_bundle_from_path(
         }
     }
 
+    if let Some(objectives) = &objectives {
+        let known_objectives: HashSet<&str> = objectives
+            .objectives
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
+        for npc in &npcs.npcs {
+            for objective_id in &npc.quest_objective_ids {
+                if !known_objectives.contains(objective_id.as_str()) {
+                    errors.push(format!(
+                        "NPC '{}' references unknown quest objective '{}'.",
+                        npc.id, objective_id
+                    ));
+                }
+            }
+        }
+    }
+
     if let Some(objectives) = &objectives
         && objectives.objectives.is_empty()
     {
@@ -1210,8 +1873,10 @@ fn load_datapack_bundle_from_path(
         rules: rules.expect("rules validated"),
         locations: locations.expect("locations validated").locations,
         items: items.expect("items validated").items,
+        npcs: npcs.npcs,
         enemies: enemies.expect("enemies validated").enemies,
         bosses: bosses.expect("bosses validated").bosses,
+        abilities: abilities.abilities,
         objectives: objectives.expect("objectives validated").objectives,
         dm_style,
         world_tone,
@@ -1247,6 +1912,11 @@ fn bundle_to_summary(bundle: &DatapackBundle) -> DatapackSummary {
                 .filter(|entry| entry.narrator_brief.is_some())
                 .count()
             + bundle
+                .npcs
+                .iter()
+                .filter(|entry| entry.narrator_brief.is_some())
+                .count()
+            + bundle
                 .enemies
                 .iter()
                 .filter(|entry| entry.narrator_brief.is_some())
@@ -1263,6 +1933,11 @@ fn bundle_to_summary(bundle: &DatapackBundle) -> DatapackSummary {
             .sum::<usize>()
             + bundle
                 .items
+                .iter()
+                .map(|entry| count_media_references(&entry.media))
+                .sum::<usize>()
+            + bundle
+                .npcs
                 .iter()
                 .map(|entry| count_media_references(&entry.media))
                 .sum::<usize>()
@@ -1285,6 +1960,11 @@ fn bundle_to_summary(bundle: &DatapackBundle) -> DatapackSummary {
                 .bosses
                 .iter()
                 .filter(|entry| entry.can_hear || entry.can_see)
+                .count()
+            + bundle
+                .npcs
+                .iter()
+                .filter(|entry| entry.actor.can_hear || entry.actor.can_see)
                 .count(),
         dm_style_preview: bundle.dm_style.clone(),
         world_tone_preview: bundle.world_tone.clone(),
@@ -1325,6 +2005,16 @@ where
     }
 }
 
+fn parse_optional_toml_file<T>(path: &PathBuf, label: &str, errors: &mut Vec<String>) -> Option<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    if !path.exists() {
+        return None;
+    }
+    parse_toml_file(path, label, errors)
+}
+
 trait HasTemplateIdentity {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
@@ -1341,6 +2031,16 @@ impl HasTemplateIdentity for LocationTemplate {
 }
 
 impl HasTemplateIdentity for ItemTemplate {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl HasTemplateIdentity for NpcTemplate {
     fn id(&self) -> &str {
         &self.id
     }
@@ -1409,6 +2109,87 @@ fn validate_non_blank_names<T: HasTemplateIdentity>(
             ));
         }
     }
+}
+
+fn validate_actor_capabilities(
+    template_kind: &str,
+    id: &str,
+    actor: &ActorCapabilitiesTemplate,
+    errors: &mut Vec<String>,
+) {
+    if actor.hp.is_some_and(|hp| hp <= 0) {
+        errors.push(format!(
+            "{template_kind} '{id}' actor.hp must be greater than 0 when present."
+        ));
+    }
+    if actor.damage.is_some_and(|damage| damage < 0) {
+        errors.push(format!(
+            "{template_kind} '{id}' actor.damage must not be negative."
+        ));
+    }
+    validate_action_costs(
+        template_kind,
+        id,
+        actor.traversal_cost,
+        actor.attack_cost,
+        errors,
+    );
+    if actor.combat && actor.damage.is_none() {
+        errors.push(format!(
+            "{template_kind} '{id}' enables actor.combat but does not define actor.damage."
+        ));
+    }
+    if !matches!(actor.disposition.trim(), "friendly" | "neutral" | "hostile") {
+        errors.push(format!(
+            "{template_kind} '{id}' actor.disposition must be friendly, neutral, or hostile."
+        ));
+    }
+}
+
+fn validate_action_costs(
+    template_kind: &str,
+    id: &str,
+    traversal_cost: u64,
+    attack_cost: u64,
+    errors: &mut Vec<String>,
+) {
+    if traversal_cost == 0 {
+        errors.push(format!(
+            "{template_kind} '{id}' traversal_cost must be greater than 0."
+        ));
+    }
+    if attack_cost == 0 {
+        errors.push(format!(
+            "{template_kind} '{id}' attack_cost must be greater than 0."
+        ));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_capability_selection(
+    template_kind: &str,
+    id: &str,
+    capabilities: &[String],
+    can_hear: bool,
+    can_see: bool,
+    can_move: bool,
+    has_actor_state: bool,
+    has_health: bool,
+    has_damage: bool,
+    errors: &mut Vec<String>,
+) {
+    crate::game::capabilities::validate_selection(
+        template_kind,
+        id,
+        capabilities,
+        has_actor_state,
+        has_health,
+        has_damage,
+        can_hear,
+        can_see,
+        can_move,
+        errors,
+    );
 }
 
 fn validate_percent(label: &str, value: u8, errors: &mut Vec<String>) {
@@ -1557,11 +2338,190 @@ damage = 1
 
         assert_eq!(record.summary.display_name, "Property Siege Classic");
         assert_eq!(record.summary.location_count, 5);
-        assert_eq!(record.summary.item_count, 5);
+        assert_eq!(record.summary.item_count, 6);
         assert_eq!(record.summary.enemy_count, 2);
         assert_eq!(record.summary.boss_count, 1);
         assert_eq!(record.summary.objective_count, 1);
-        assert_eq!(record.summary.sensory_template_count, 3);
+        assert_eq!(record.summary.sensory_template_count, 4);
+    }
+
+    #[test]
+    fn authored_npc_template_loads_with_quest_and_perception_capabilities() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected fixture bundle");
+        let npc = bundle
+            .npcs
+            .iter()
+            .find(|npc| npc.id == "kitchen_neighbour")
+            .expect("authored NPC should load");
+        assert_eq!(npc.disposition, "friendly");
+        assert_eq!(npc.quest_objective_ids, vec!["secure_property"]);
+        assert!(npc.actor.can_hear && npc.actor.can_see);
+    }
+
+    #[test]
+    fn host_capabilities_are_validated_for_all_template_families() {
+        let dir = TempDatapackDir::new("invalid_behavior_tag");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Objective"
+description = "Objective."
+tags = ["test"]
+"#,
+        );
+        dir.write_file(
+            "templates/npcs.toml",
+            r#"[[npcs]]
+id = "odd_npc"
+name = "Odd NPC"
+description = "Odd."
+tags = []
+capabilities = ["teleport_everywhere"]
+
+[npcs.actor]
+can_move = true
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "invalid_behavior_tag")
+            .expect_err("unknown host capability must fail pack validation");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("unknown host capability 'teleport_everywhere'"))
+        );
+    }
+
+    #[test]
+    fn ability_grant_values_reject_zero_as_an_invalid_finite_lifetime() {
+        let dir = TempDatapackDir::new("zero_ability_grant_values");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "test_objective"
+name = "Objective"
+description = "Objective."
+tags = ["test"]
+"#,
+        );
+        dir.write_file(
+            "templates/abilities.toml",
+            r#"[[abilities]]
+id = "bad_ability"
+name = "Bad Ability"
+description = "A malformed finite ability."
+progress_pool = "test"
+default_uses = 0
+duration_turns = 0
+
+[abilities.effect]
+kind = "damage"
+amount = 1
+"#,
+        );
+        dir.write_file(
+            "templates/items.toml",
+            r#"[[items]]
+id = "bad_scroll"
+name = "Bad Scroll"
+description = "A malformed finite grant."
+tags = ["utility"]
+
+[[items.ability_grants]]
+template_id = "bad_ability"
+remaining_uses = 0
+duration_turns = 0
+"#,
+        );
+
+        let errors = load_datapack_bundle_from_path(dir.path(), "zero_ability_grant_values")
+            .expect_err("zero must not describe a usable finite grant");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("default_uses must be positive"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("duration_turns must be positive"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("remaining_uses must be positive"))
+        );
+    }
+
+    #[test]
+    fn npc_validation_rejects_unknown_quest_objective() {
+        let dir = TempDatapackDir::new("invalid_npc_quest");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "goal"
+name = "Goal"
+description = "Finish."
+tags = ["test"]
+required_location_id = "start"
+"#,
+        );
+        dir.write_file(
+            "templates/npcs.toml",
+            r#"[[npcs]]
+id = "guide"
+name = "Guide"
+description = "Helpful."
+tags = ["guide"]
+disposition = "friendly"
+quest_objective_ids = ["missing_goal"]
+"#,
+        );
+        let errors = load_datapack_bundle_from_path(dir.path(), "invalid_npc_quest")
+            .expect_err("unknown NPC quest should fail validation");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("unknown quest objective 'missing_goal'"))
+        );
+    }
+
+    #[test]
+    fn npc_validation_rejects_unknown_location_placement() {
+        let dir = TempDatapackDir::new("invalid_npc_location");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "goal"
+name = "Goal"
+description = "Finish."
+tags = ["test"]
+required_location_id = "start"
+"#,
+        );
+        dir.write_file(
+            "templates/locations.toml",
+            r#"[[locations]]
+id = "start"
+name = "Start"
+description = "Start room."
+tags = ["start"]
+connections = []
+items = []
+npcs = ["missing_npc"]
+enemies = []
+bosses = ["test_boss"]
+"#,
+        );
+        let errors = load_datapack_bundle_from_path(dir.path(), "invalid_npc_location")
+            .expect_err("unknown NPC placement should fail validation");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("references unknown NPC 'missing_npc'"))
+        );
     }
 
     #[test]
@@ -1596,6 +2556,46 @@ damage = 1
                 .enemies
                 .iter()
                 .any(|enemy| enemy.id == "static_guard" && !enemy.can_hear)
+        );
+    }
+
+    #[test]
+    fn item_actor_validation_rejects_invalid_health_and_combat_configuration() {
+        let dir = TempDatapackDir::new("invalid_item_actor");
+        write_minimal_test_datapack(
+            &dir,
+            r#"[[objectives]]
+id = "goal"
+name = "Goal"
+description = "Finish."
+tags = ["test"]
+required_location_id = "start"
+"#,
+        );
+        dir.write_file(
+            "templates/items.toml",
+            r#"[[items]]
+id = "real_key"
+name = "Real Key"
+description = "A real key."
+tags = ["utility"]
+
+[items.actor]
+hp = 0
+combat = true
+"#,
+        );
+        let errors = load_datapack_bundle_from_path(dir.path(), "invalid_item_actor")
+            .expect_err("invalid actor capability configuration should fail validation");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("actor.hp must be greater than 0"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("actor.combat but does not define actor.damage"))
         );
     }
 

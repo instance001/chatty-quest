@@ -10,7 +10,8 @@ Current status: `v0.1 accepted`
 
 Current branch note:
 
-- the branch now includes post-`v0.1` siege-depth work
+- the branch now includes post-`v0.1` siege-depth work plus generic actor, ownership, ability,
+  progression, media-pool, and player-library substrate work
 - this audit entry has been refreshed to reflect that current branch state without changing the historical fact that `v0.1` itself was accepted on `2026-06-11`
 
 Meaning:
@@ -23,7 +24,7 @@ Meaning:
 
 Automated evidence:
 
-- `cargo test` passes with `105` passing tests
+- `cargo test` passes with `313` passing tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
 - tests cover datapack discovery, command boundary parsing, engine/scenario boundary guarding, multi-gate locked progression, broken-open gate state, barricade validation, finale-security rule validation, location/item/enemy flavor hook validation, two-room barricade pressure behavior, noise escalation, noise attractor retargeting, max-noise enemy spawning, spawned-enemy movement blockers and hazard attacks, threat forecasting, utility-effect item behavior, utility/security truth surfacing, objective-condition feedback, objective-condition name surfacing, sidebar objective-progress surfacing, reducer behavior, post-win epilogue hooks, epilogue hook UI surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, UI-derived recommendation behavior, and save/load roundtrip
 

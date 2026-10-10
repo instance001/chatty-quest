@@ -1,0 +1,18 @@
+[[npcs]]
+id = "kitchen_neighbour"
+name = "Kitchen Neighbour"
+description = "A rattled neighbour who knows the house well enough to point at the obvious danger without pretending it is harmless."
+narrator_brief = "Keep this survivor practical, worried, and unwilling to make promises the house cannot keep."
+tags = ["survivor", "quest_giver"]
+disposition = "friendly"
+faction = "survivors"
+quest_objective_ids = ["secure_property"]
+
+[npcs.actor]
+can_hear = true
+can_see = true
+can_move = false
+combat = false
+
+[npcs.media]
+display_role = "npc"

@@ -35,18 +35,60 @@ The runtime command path is:
 ```text
 player text
   -> parse_command
-  -> ParsedCommand
-  -> GameAction
-  -> apply_action
-  -> ActionOutcome
-  -> NarratorContext
-  -> Narrator
-  -> UI log
+  -> recognized command: GameAction -> apply_action -> ActionOutcome -> narration
+  -> other free text: bounded narration lane -> optional host-gated proposal lane
+  -> UI log / editable proposal card
 ```
 
-Parser failures stop before the reducer and narrator.
+Recognized commands use the reducer path. Other free text is not converted into a command by the
+narrator; it can receive presentation-only narration and may independently be considered for a
+bounded proposal.
 
 Reducer rejections still produce structured `ActionOutcome` data, because the player attempted a valid command shape that failed game rules.
+
+## Controller-Neutral Action Dispatch
+
+The command boundary describes an attempted action, not a player-only mechanic. The reducer
+resolves the current `player_entity_id` as the controlled actor at commit time. That actor becomes
+the action origin only after the host has validated the relevant capability and runtime
+prerequisites.
+
+```text
+`attack <target>`
+  -> `AttackTarget { target }`
+  -> reducer resolves controlled actor and present target
+  -> validates combat contract, hostility, health, readiness, and targetability
+  -> commits events or emits a structured rejection
+```
+
+The same rule applies to move, wait, inspect, ownership transfer, and ability commands. Changing
+the controlled actor changes the origin and its owned state (inventory, ability grants, progress,
+readiness); it never selects a separate NPC-only or item-only reducer implementation.
+
+The parser preserves only bounded syntax. It does not look up the actor, infer whether prose
+claimed success, or decide who may act. Named-actor natural-language bridges, when available,
+must resolve into the same bounded host action request and then pass the same reducer validation.
+
+## Current Command Families
+
+The exact accepted aliases live beside the parser, but the current command families include:
+
+- `go <location>`, `look`, `inspect <thing>`, and `wait`;
+- `take <item>`, `drop <item>`, `equip <item>`, `unequip <item>`, and `use <item>`;
+- `give <item> to <actor>`, `<actor>, take my <item>`, `<actor>, give me <item>`, and
+  `steal <item> from <actor>`;
+- `attack [target]` and `hit [target]`; a supplied target remains explicit through reduction;
+- `cast <ability> [at <target>]`, `learn <ability>`, and bounded progression commands;
+- bounded social commands whose event outcomes are host-defined.
+
+Ownership language always resolves into `TransferItem`, and ability language always resolves to a
+real owned `AbilityGrant`. No command wording creates an alternate mechanic.
+
+`cast <ability> at <target>` always means that the controlled actor is casting. Mentioning a
+present actor as the target must not reinterpret that actor as the caster. A named non-player
+actor must use one of the explicit forms `<actor>, cast <ability> at <target>`,
+`<actor> cast <ability> at <target>`, or `ask <actor> to cast <ability> at <target>`; that actor
+then still needs its own accessible grant and must pass the same reducer validation.
 
 ## Parser Responsibilities
 
@@ -65,6 +107,7 @@ The parser may not:
 - decide whether a command succeeds mechanically
 - call a narrator
 - ask an LLM to reinterpret arbitrary text
+- resolve player control or capability legality
 
 ## Reducer Responsibilities
 
@@ -77,52 +120,50 @@ It owns:
 - structured events
 - deterministic outcome lines
 - objective completion
-- win/loss truth
+- win/incapacitation truth
+- controlled-origin resolution, capability checks, and action readiness
+- generic event projection inputs (`type`, `origin`, `impact`, `outcome`)
 
 ## Narrator Responsibilities
 
-The narrator receives reducer-confirmed context after parsing and reduction.
+The narrator receives bounded context after parsing and, for command turns, reduction. For free
+text, it can receive the player message plus bounded visible context.
 
 It may:
 
 - add style
 - clarify confirmed results
 - present the scene in the configured tone
+- fill a host-selected bounded proposal form when the host gate permits it
 
 It may not:
 
 - decide command intent from raw player text
-- convert failed parser text into mechanics
+- turn free text or prose directly into mechanics
 - override reducer rejection
 - invent state changes
 
-## Future Natural-Language Direction
+## Free Text And Proposals
 
-A future natural-language input system should be a command resolver, not a narrator power.
+The host owns free-text proposal probability, allowed proposal kinds, fields, parsing, validation,
+the editable approval card, and reducer admission. The narrator may provide values for a selected
+form but cannot choose an unknown kind, add unknown fields, repair missing mechanics, or mutate a
+run.
 
 The safe shape is:
 
 ```text
 player text
-  -> deterministic parser or bounded resolver
-  -> candidate GameAction
-  -> reducer
-  -> narrator context
-  -> narration
+  -> deterministic command parser
+  -> recognized command: reducer
+  -> otherwise: narration only, optionally host-gated proposal form
+  -> player approval
+  -> reducer validation and commit
 ```
-
-If a model is ever used to help resolve player intent, it should output a bounded command candidate that is still validated before the reducer runs.
-
-It should not produce authoritative prose as a substitute for `GameAction`.
 
 ## Current Non-Goals
 
-Do not add these yet:
-
-- broad free-text command interpretation
-- LLM command parsing
-- narrator-side action execution
+- LLM command parsing or narrator-side action execution
+- free text silently becoming a deterministic command
 - command memory outside `RunState`
 - hidden intent inference
-
-The demo should stay small, explicit, and inspectable while the first datapack proves the engine contract.

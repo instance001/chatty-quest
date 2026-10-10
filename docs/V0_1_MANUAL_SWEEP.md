@@ -7,6 +7,8 @@ Refresh note:
 - refreshed on `2026-07-16` for the current post-`v0.1` branch
 - this sweep now includes barricade-state, noise-state, guided-command, and siege-route forecast checks
 - refreshed again on `2026-07-28` to include epilogue, narrator-context, and command-boundary checks
+- the active post-release manual contract is now maintained separately in
+  [POST_LIBRARY_MANUAL_SWEEP.md](POST_LIBRARY_MANUAL_SWEEP.md)
 
 Goal:
 
@@ -24,7 +26,7 @@ Estimated time: `5-10 minutes`
 
 Expected baseline:
 
-- `cargo test` passes with `105` automated tests
+- `cargo test` passes with `313` automated tests
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
 - `Property Siege Classic` is the selected datapack
 - setup screen is visible

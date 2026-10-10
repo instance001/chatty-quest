@@ -61,6 +61,28 @@ It does not delegate truth ownership to:
 - UI selection state
 - temporary visual cues
 
+## Capability, Actor, And Ownership Invariants
+
+An enabled mechanical capability is a promise of a real host-owned action path. The capability
+registry is the root of its dependent schema: it defines applicable child fields, defaults,
+validation, prerequisites, and runtime requirements. Child fields are not a giant flat template
+surface and are inapplicable when their parent capability is disabled.
+
+Runtime actors are entity-agnostic. The controlled player, NPCs, enemies, bosses, pets, summons,
+and actor-capable items may share a single actor state and action dispatch path when their
+capabilities permit it. `player_entity_id` identifies the entity currently controlled by the
+player; it does not grant that entity separate mechanics.
+
+Ownership is similarly generic. Eligible entities with the inventory contract and locations are
+endpoints. Every ownership mutation is `TransferItem { item_id, origin, destination }`, which
+commits one `ItemTransferred` event before optional social or presentation consequences. Equipment
+is a relationship layered over ownership and cannot outlive it.
+
+An ability definition is template data. An `AbilityGrant` is runtime state owned by an actor or
+item. It carries the mutable use count, expiry, cooldown, source, and ownership identity. Progress
+pools are actor-local; controlling another actor never transfers the default player's XP, grants,
+or milestone choices.
+
 ## Runtime Layers
 
 The runtime model should be understood as four layers.
@@ -93,7 +115,8 @@ Examples in current `v0.1`:
 - `hp`
 - `max_hp`
 - `active_objective`
-- `turn_index`
+- `turn_index` (the authoritative integer world-time cursor)
+- `actor_ready_at` (absolute per-runtime-entity action readiness)
 - `noise_level`
 - `noise_spawn_count`
 - spawned-enemy noise, sight, origin, search, and delay state
@@ -110,7 +133,13 @@ Examples in current `v0.1`:
 
 This layer is authoritative and serializable.
 
-`turn_index` advances once per accepted player turn, including accepted epilogue exploration. Rejected and movement-blocked commands do not advance it. Deterministic percentage rolls and random-feeling reducer choices may use `turn_index` as a replayable cursor; bounded support memory such as `rolling_summary` must not be used as the only source of roll variation.
+`turn_index` advances by the successful action's positive resolved world-time cost. Controller
+identity never chooses that cost: actor/template/action data does. `actor_ready_at` records when
+each runtime entity may next take an ordinary action, preserving the same mechanics if control
+changes. Rejected and movement-blocked commands do not advance time or readiness. Deterministic
+percentage rolls and random-feeling reducer choices may use `turn_index` as a replayable cursor;
+bounded support memory such as `rolling_summary` must not be used as the only source of roll
+variation.
 
 ### 3. Support Memory Layer
 
@@ -212,32 +241,52 @@ Buckets may be represented as:
 
 The exact Rust structure matters less than the truth model.
 
-## Current `v0.1` Runtime Shape
+## Current Runtime Shape
 
-The current implementation is best described as:
+The current implementation is a compatibility-preserving hybrid:
 
-- template-authored content
-- direct canonical run state
-- template-id keyed buckets
-- lightweight support memory
+- template-authored content remains immutable scenario canon
+- canonical run state stores explicit runtime instances where identity or mutable state matters
+- legacy template-id maps remain only as compatibility mirrors for established enemy/boss rules
+- session scratch truth uses the same reducer-owned instance buckets
 
-That means the current engine does not yet model all runtime entities as explicit instance structs.
+Implemented instance seams include `instance_id`, `template_id`, bucket/lifecycle, provenance, and
+location/owner state for world/inventory items, NPCs, runtime encounters, objectives, temporary
+exits, and status effects. `ActorState` is reusable state for entities that opt into host-owned
+health, perception, movement, or combat capabilities. The host capability registry is the single
+vocabulary for those mechanics; a template family never receives mechanics merely because it is
+called an enemy, NPC, boss, or item.
 
 Examples:
 
-- `location_items` maps location ids to item template ids
-- `inventory` stores lightweight item entries derived from template content
-- `enemy_hp` maps enemy ids directly to HP values
-- `boss_hp` maps boss ids directly to HP values
+- `world_item_instances` and inventory entries retain item ownership/location and provenance
+- `location_npcs` stores authored and runtime NPC instances with disposition and actor state
+- `enemy_instances` and `boss_instances` retain live/defeated encounter state alongside legacy
+  HP maps used by existing reducer paths
+- the shared noise-pool blackboard keeps target/origin/search/sight state by spawned instance id
 
-This is a valid `v0.1` implementation strategy because it is:
+Autonomous outcomes are entity-agnostic reducer facts: `ActorSpawnedFromNoise`, `ActorMoved`,
+`ActorWaited`, and `ActorAttackedHazard` carry an actor origin id rather than assuming the
+actor is an enemy. Noise and sight-attractor events likewise carry actor ids. Diagnostics,
+narration, action traces, and media consume those shared events, so a capability-enabled NPC or
+item follows the same causal presentation path as an encounter actor.
 
-- deterministic
-- inspectable
-- serializable
-- easy to reason about
+The host exposes active actor-capable entities at a location through one runtime actor directory.
+That directory is a read projection over compatibility storage, not a second state store: it
+includes the controlled player projection, active NPCs, and only items that explicitly opt into an
+actor contract (including actor-capable items held by the player or an NPC, at the holder's effective
+location). Combat dispatch, named actor instructions, autonomous friendly turns, and
+observation surfaces consume this directory rather than adding separate NPC/item lookup paths.
+Entity nouns remain presentation and storage details; capability contract and disposition determine
+which host action is available.
 
-But it should be treated as a deliberately small first shape, not as proof that instance seams are unnecessary.
+The controlled player is included as a compatibility projection. Player Attack and Move first enter
+the generic actor-action dispatch, then bridge to their established deterministic reducers so
+equipment damage, fog, objective, and save semantics remain authoritative during the migration.
+This is intentionally a bridge, not a second player mechanics system.
+
+This shape is deterministic, inspectable, serializable, and allows a template family to opt into a
+shared engine capability without handing authority to the narrator.
 
 ## Recommended Future Instance Seams
 
@@ -466,7 +515,9 @@ For `v0.1`, the runtime model should remain:
 - easy to inspect
 - easy to validate
 
-It does not need a universal entity framework yet.
+It does not need a new parallel entity framework yet. It does need all new actor mechanics to be
+routed through the host capability registry and shared `ActorState`, rather than added as
+pack-specific or template-species-specific logic.
 
 It does need:
 

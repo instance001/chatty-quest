@@ -2,13 +2,14 @@ use std::collections::HashMap;
 
 use eframe::egui;
 
+use crate::collection::{PlayerTemplate, PlayerTemplateKind, PlayerTemplateMechanics};
 use crate::data::datapacks::{DatapackBundle, DatapackCatalog};
 use crate::diagnostics::DiagnosticReport;
 use crate::game::RunState;
 use crate::media::MediaPanelState;
 use crate::ui::{
     MapTileHoverModel, MapTileVisibilityModel, build_asset_viewer_chrome, build_character_actions,
-    build_character_summary, build_diagnostics_summary, build_game_action_bar,
+    build_character_summary, build_diagnostics_summary, build_game_action_bar_with_focus,
     build_game_header_chips, build_game_sidebar, build_inventory_action_rows,
     build_inventory_thumbnail_model, build_item_asset_viewer_request, build_local_item_action_rows,
     build_location_asset_viewer_request, build_map_exit_buttons, build_map_layout,
@@ -28,6 +29,43 @@ pub struct AssetViewerRequest {
     pub resolved_source_label: Option<String>,
     pub using_datapack_fallback: bool,
     pub using_engine_fallback: bool,
+}
+
+#[derive(Default)]
+pub struct LibraryUiState {
+    feedback: Option<LibraryFeedback>,
+    pending_removal: Option<LibraryRemovalTarget>,
+    editing_tags: Option<LibraryTagEdit>,
+    editing_template_media: Option<LibraryTemplateMediaEdit>,
+    import_path: String,
+    import_tags: String,
+}
+
+struct LibraryFeedback {
+    message: String,
+    is_error: bool,
+}
+
+enum LibraryRemovalTarget {
+    Template { id: String, name: String },
+    Media { path: String },
+}
+
+struct LibraryTagEdit {
+    target: LibraryTagTarget,
+    text: String,
+}
+
+struct LibraryTemplateMediaEdit {
+    template_id: String,
+    image: String,
+    motion: String,
+    audio: String,
+}
+
+enum LibraryTagTarget {
+    Template(String),
+    Media(String),
 }
 
 pub(crate) struct MapTileLayout {
@@ -70,6 +108,18 @@ pub struct SetupScreenModel<'a> {
     pub dm_capsule: &'a mut String,
     pub cpu_helper_model: &'a mut String,
     pub gpu_narrator_model: &'a mut String,
+    pub narrator_backend: &'a mut String,
+    pub narrator_endpoint: &'a mut String,
+    pub byo_provider: &'a mut String,
+    pub byo_model: &'a mut String,
+    pub byo_endpoint: &'a mut String,
+    pub byo_api_key: &'a mut String,
+    pub narration_preferences: &'a mut crate::game::narrator::NarrationPreferences,
+    pub local_narrator_models: Vec<String>,
+    pub allow_narrator_generated_additions: &'a mut bool,
+    pub generated_proposal_kinds: &'a mut Vec<String>,
+    pub play_preset: &'a mut String,
+    pub play_contract_summary: Vec<String>,
     pub datapacks: &'a DatapackCatalog,
     pub selected_record: Option<SelectedDatapackPreview>,
     pub selected_invalid: Option<SelectedInvalidDatapackPreview>,
@@ -118,10 +168,88 @@ pub struct SelectedInvalidDatapackPreview {
     pub errors: Vec<String>,
 }
 
+fn slider_node(value: f32) -> usize {
+    (value.clamp(0.0, 1.0) * 3.0).round() as usize
+}
+
+fn apply_byo_provider_defaults(provider: &str, model: &mut String, endpoint: &mut String) {
+    let (default_model, default_endpoint) = match provider {
+        "OpenAI" => ("gpt-5-mini", "https://api.openai.com/v1/chat/completions"),
+        "xAI" => ("grok-4.7", "https://api.x.ai/v1/chat/completions"),
+        "Anthropic" => ("claude-sonnet-4-6", "https://api.anthropic.com/v1/messages"),
+        "Google Gemini" => (
+            "gemini-3.5-flash",
+            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        ),
+        _ => ("", "https://example.com/v1/chat/completions"),
+    };
+    *model = default_model.to_owned();
+    *endpoint = default_endpoint.to_owned();
+}
+
+fn pressure_node_copy(value: f32) -> (&'static str, &'static str) {
+    match slider_node(value) {
+        0 => (
+            "Gentle",
+            "Lower mechanical pressure; the scenario gives more room to recover.",
+        ),
+        1 => (
+            "Standard",
+            "Balanced authored pressure for a normal scenario run.",
+        ),
+        2 => (
+            "Pressed",
+            "Higher mechanical pressure; mistakes and threats matter sooner.",
+        ),
+        _ => (
+            "Brutal",
+            "Maximum mechanical pressure within the authored rules.",
+        ),
+    }
+}
+
+fn narration_node_copy(value: f32) -> (&'static str, &'static str) {
+    match slider_node(value) {
+        0 => (
+            "Tight",
+            "Concise, factual presentation with minimal embellishment.",
+        ),
+        1 => (
+            "Guided",
+            "Controlled flavor around reducer-confirmed events.",
+        ),
+        2 => (
+            "Loose",
+            "More expressive narration, while the reducer still owns truth.",
+        ),
+        _ => (
+            "Wild",
+            "Maximum presentation freedom; no prose can change game state.",
+        ),
+    }
+}
+
+fn show_slider_nodes(ui: &mut egui::Ui, value: &mut f32, labels: [&str; 4]) {
+    ui.horizontal_wrapped(|ui| {
+        for (index, label) in labels.into_iter().enumerate() {
+            let node_value = index as f32 / 3.0;
+            if ui
+                .selectable_label(slider_node(*value) == index, label)
+                .clicked()
+            {
+                *value = node_value;
+            }
+        }
+    });
+}
+
 pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> SetupScreenAction {
     let mut action = SetupScreenAction::None;
 
     egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
         ui.add_space(24.0);
         if let Some(image_path) = model.header_image_path {
             let image_uri = local_file_uri(&image_path);
@@ -240,21 +368,105 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
 
                     ui.add_space(8.0);
                     ui.label("Difficulty");
-                    ui.add(
+                    let pressure_slider = ui.add(
                         egui::Slider::new(model.difficulty, 0.0..=1.0)
-                            .show_value(false)
+                            .step_by(1.0 / 3.0)
+                            .custom_formatter(|value, _| pressure_node_copy(value as f32).0.to_owned())
                             .text("Difficulty"),
                     );
-                    ui.small("Mechanical pressure dial. Separate from tone.");
+                    if pressure_slider.changed() {
+                        *model.difficulty = slider_node(*model.difficulty) as f32 / 3.0;
+                    }
+                    show_slider_nodes(
+                        ui,
+                        model.difficulty,
+                        ["Gentle", "Standard", "Pressed", "Brutal"],
+                    );
+                    let (pressure_label, pressure_description) = pressure_node_copy(*model.difficulty);
+                    ui.small(format!("{pressure_label}: {pressure_description}"));
 
                     ui.add_space(8.0);
                     ui.label("Chaos mode");
-                    ui.add(
+                    let narration_slider = ui.add(
                         egui::Slider::new(model.chaos_mode, 0.0..=1.0)
-                            .show_value(false)
+                            .step_by(1.0 / 3.0)
+                            .custom_formatter(|value, _| narration_node_copy(value as f32).0.to_owned())
                             .text("Chaos"),
                     );
-                    ui.small("Narration looseness dial. Never truth ownership.");
+                    if narration_slider.changed() {
+                        *model.chaos_mode = slider_node(*model.chaos_mode) as f32 / 3.0;
+                    }
+                    show_slider_nodes(
+                        ui,
+                        model.chaos_mode,
+                        ["Tight", "Guided", "Loose", "Wild"],
+                    );
+                    let (narration_label, narration_description) = narration_node_copy(*model.chaos_mode);
+                    ui.small(format!("{narration_label}: {narration_description}"));
+
+                    ui.add_space(8.0);
+                    ui.checkbox(
+                        model.allow_narrator_generated_additions,
+                        "Ask before narrator inventions become real",
+                    );
+                    ui.small("When enabled, proposed items need your approval before the reducer adds them to this run.");
+                    ui.small("Chaos controls how often the host rolls. This whitelist controls which proposal families may be selected at all.");
+                    ui.label("Random emergence allowed");
+                    ui.horizontal_wrapped(|ui| {
+                        for (kind, label) in [
+                            ("item", "Items"),
+                            ("npc", "NPCs"),
+                            ("enemy", "Enemies"),
+                            ("boss", "Bosses"),
+                            ("objective", "Objectives"),
+                            ("status", "Status effects"),
+                            ("ability_grant", "Ability grants"),
+                            ("temporary_exit", "Routes"),
+                        ] {
+                            let mut enabled = model.generated_proposal_kinds.iter().any(|allowed| allowed == kind);
+                            if ui.checkbox(&mut enabled, label).changed() {
+                                if enabled {
+                                    model.generated_proposal_kinds.push(kind.to_owned());
+                                    model.generated_proposal_kinds.sort();
+                                    model.generated_proposal_kinds.dedup();
+                                } else {
+                                    model.generated_proposal_kinds.retain(|allowed| allowed != kind);
+                                }
+                            }
+                        }
+                    });
+
+                    ui.add_space(8.0);
+                    ui.label("Narration events");
+                    ui.small("Choose the event types you want narrated. The cartridge still decides whether an enabled event uses local narration, mock flavor, or plain system text.");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut model.narration_preferences.summary, "Opening & summaries");
+                        ui.checkbox(&mut model.narration_preferences.routine, "Routine actions");
+                        ui.checkbox(&mut model.narration_preferences.notable, "Discoveries & movement");
+                        ui.checkbox(&mut model.narration_preferences.major, "Major progress");
+                        ui.checkbox(&mut model.narration_preferences.critical, "Critical outcomes");
+                        ui.checkbox(&mut model.narration_preferences.inspection, "Look & inspect");
+                    });
+
+                    ui.add_space(8.0);
+                    ui.label("Play contract");
+                    egui::ComboBox::from_id_salt("play_contract_preset")
+                        .selected_text(model.play_preset.as_str())
+                        .show_ui(ui, |ui| {
+                            for (value, label) in [
+                                ("simulation", "Simulation"),
+                                ("rules_first", "Rules First"),
+                                ("adventure", "Adventure"),
+                                ("chaos", "Chaos"),
+                                ("unleashed", "Unleashed"),
+                            ] {
+                                ui.selectable_value(model.play_preset, value.to_owned(), label);
+                            }
+                        });
+                    for control in &model.play_contract_summary {
+                        ui.small(control);
+                    }
+                    ui.small("Protected: reducer-owned truth, explicit admission, and immutable authored packs.");
 
                     ui.add_space(8.0);
                     ui.label("Fog of war");
@@ -287,7 +499,7 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
             columns[1].vertical(|ui| {
                 ui.group(|ui| {
                     ui.set_max_width(460.0);
-                    ui.heading("Future Model Lanes");
+                    ui.heading("Narrator Service");
                     ui.label("Bookkeeper / summary helper");
                     ui.add_enabled(
                         false,
@@ -296,13 +508,81 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
                     ui.small("Reserved for a future CPU-friendly helper lane.");
 
                     ui.add_space(8.0);
-                    ui.label("Main narrator");
-                    ui.add_enabled(
-                        false,
-                        egui::TextEdit::singleline(model.gpu_narrator_model),
-                    );
-                    ui.small("Reserved for a future GPU-backed narrator lane.");
+                    ui.label("Backend");
+                    egui::ComboBox::from_id_salt("narrator_selector")
+                        .selected_text(model.narrator_backend.as_str())
+                        .show_ui(ui, |ui| {
+                            for label in [
+                                "None",
+                                "Mock Narrator",
+                                "Local llama.cpp / GGUF",
+                                "Local OpenAI-compatible",
+                                "BYO API Key",
+                            ] {
+                                ui.selectable_value(
+                                    model.narrator_backend,
+                                    label.to_owned(),
+                                    label,
+                                );
+                            }
+                        });
+                    ui.label("Model");
+                    egui::ComboBox::from_id_salt("local_narrator_model")
+                        .selected_text(model.gpu_narrator_model.as_str())
+                        .show_ui(ui, |ui| {
+                            for name in &model.local_narrator_models {
+                                ui.selectable_value(
+                                    model.gpu_narrator_model,
+                                    name.clone(),
+                                    name,
+                                );
+                            }
+                        });
+                    if model.local_narrator_models.is_empty() {
+                        ui.small("Drop .gguf files into models/local/, then refresh setup.");
+                    }
+                    ui.label("Endpoint");
+                    ui.add(egui::TextEdit::singleline(model.narrator_endpoint));
+                    ui.small("Backend and model remain separate from the DM capsule/persona.");
                 });
+
+                ui.add_space(12.0);
+
+                if model.narrator_backend == "BYO API Key" {
+                    ui.group(|ui| {
+                        ui.heading("Bring Your Own API Key");
+                        ui.small("Choose a provider to prefill its endpoint and narrator model. Your key stays only in this running app and is never written to saves or title settings.");
+                        let provider_before = model.byo_provider.clone();
+                        ui.label("Provider");
+                        egui::ComboBox::from_id_salt("byo_provider")
+                            .selected_text(model.byo_provider.as_str())
+                            .show_ui(ui, |ui| {
+                                for provider in ["OpenAI", "xAI", "Anthropic", "Google Gemini", "Custom OpenAI-compatible"] {
+                                    ui.selectable_value(model.byo_provider, provider.to_owned(), provider);
+                                }
+                            });
+                        if *model.byo_provider != provider_before {
+                            apply_byo_provider_defaults(
+                                model.byo_provider,
+                                model.byo_model,
+                                model.byo_endpoint,
+                            );
+                        }
+                        if ui.button("Apply provider defaults").clicked() {
+                            apply_byo_provider_defaults(
+                                model.byo_provider,
+                                model.byo_model,
+                                model.byo_endpoint,
+                            );
+                        }
+                        ui.label("Narrator model");
+                        ui.add(egui::TextEdit::singleline(model.byo_model));
+                        ui.label("API endpoint");
+                        ui.add(egui::TextEdit::singleline(model.byo_endpoint));
+                        ui.label("API key");
+                        ui.add(egui::TextEdit::singleline(model.byo_api_key).password(true));
+                    });
+                }
 
                 ui.add_space(12.0);
 
@@ -373,6 +653,7 @@ pub fn show_setup_screen(ctx: &egui::Context, model: SetupScreenModel<'_>) -> Se
         );
         ui.add_space(10.0);
         ui.label("`v0.1` keeps setup lean on purpose: choose the run shape, then drop straight into the deterministic shell.");
+            });
     });
 
     action
@@ -449,10 +730,12 @@ pub fn show_game_action_bar(
     ctx: &egui::Context,
     current_run: Option<&RunState>,
     current_bundle: Option<&DatapackBundle>,
+    focused_entity_id: Option<&str>,
     current_input: &mut String,
 ) -> Option<String> {
     let mut queued_command = None;
-    let action_bar = build_game_action_bar(current_run, current_bundle);
+    let action_bar =
+        build_game_action_bar_with_focus(current_run, current_bundle, focused_entity_id);
 
     egui::TopBottomPanel::bottom("game_action_bar")
         .resizable(false)
@@ -509,9 +792,10 @@ pub fn show_game_tab(
     chaos_mode: f32,
     fog_mode: &str,
     log_lines: &[String],
-) -> (Option<String>, Option<AssetViewerRequest>) {
+) -> (Option<String>, Option<AssetViewerRequest>, Option<String>) {
     let mut queued_command = None;
     let mut viewer_request = None;
+    let mut focus_entity_id = None;
     let map_layout = current_bundle
         .zip(current_run)
         .map(|(bundle, run)| build_map_layout(bundle, run));
@@ -520,121 +804,130 @@ pub fn show_game_tab(
         .resizable(true)
         .default_width(240.0)
         .show(ctx, |ui| {
-            ui.heading("Map");
-            if let Some(run) = current_run {
-                if let Some(bundle) = current_bundle {
-                    if let Some(sidebar) = build_game_sidebar(run, bundle) {
-                        ui.label(format!(
-                            "Current location: {}",
-                            sidebar.current_location_name
-                        ));
-                        ui.small(&sidebar.current_location_description);
-                        if !sidebar.current_location_tags.is_empty() {
-                            ui.small(format!(
-                                "Tags: {}",
-                                sidebar.current_location_tags.join(", ")
-                            ));
-                        }
-                        ui.small(&sidebar.run_phase_line);
-                        ui.small(&sidebar.noise_line);
-                        ui.small(&sidebar.noise_hint_line);
-                        ui.small(&sidebar.suggested_command_line);
-                        if !sidebar.objective_progress_rows.is_empty() {
-                            ui.separator();
-                            ui.label("Objective progress");
-                            for row in &sidebar.objective_progress_rows {
-                                ui.small(row);
+            egui::ScrollArea::vertical()
+                .id_salt("map_panel_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.heading("Map");
+                    if let Some(run) = current_run {
+                        if let Some(bundle) = current_bundle {
+                            if let Some(sidebar) = build_game_sidebar(run, bundle) {
+                                ui.label(format!(
+                                    "Current location: {}",
+                                    sidebar.current_location_name
+                                ));
+                                ui.small(&sidebar.current_location_description);
+                                if !sidebar.current_location_tags.is_empty() {
+                                    ui.small(format!(
+                                        "Tags: {}",
+                                        sidebar.current_location_tags.join(", ")
+                                    ));
+                                }
+                                ui.small(&sidebar.run_phase_line);
+                                ui.small(&sidebar.noise_line);
+                                ui.small(&sidebar.noise_hint_line);
+                                ui.small(&sidebar.suggested_command_line);
+                                if !sidebar.objective_progress_rows.is_empty() {
+                                    ui.separator();
+                                    ui.label("Objective progress");
+                                    for row in &sidebar.objective_progress_rows {
+                                        ui.small(row);
+                                    }
+                                }
+                                for status_line in &sidebar.current_location_status_lines {
+                                    ui.small(status_line);
+                                }
+                                if let Some(layout) = &map_layout {
+                                    ui.separator();
+                                    ui.label("Map tiles");
+                                    render_map_layout(
+                                        ui,
+                                        layout,
+                                        run,
+                                        fog_mode,
+                                        &mut queued_command,
+                                        &mut viewer_request,
+                                    );
+                                }
+                                if !sidebar.connected_exits.is_empty() {
+                                    ui.separator();
+                                    ui.label("Connected exits");
+                                    for exit in &sidebar.connected_exits {
+                                        if ui
+                                            .button(format!(
+                                                "Go to {}{}",
+                                                exit.destination_name,
+                                                location_state_suffix(
+                                                    exit.locked,
+                                                    exit.broken,
+                                                    exit.barricaded
+                                                )
+                                            ))
+                                            .clicked()
+                                        {
+                                            queued_command =
+                                                Some(format!("go {}", exit.destination_id));
+                                        }
+                                        if let Some(route_note) = &exit.route_note {
+                                            ui.small(format!("  {}", route_note));
+                                        }
+                                        if let Some(threat_forecast) = &exit.threat_forecast {
+                                            ui.small(format!("  forecast: {}", threat_forecast));
+                                        }
+                                    }
+                                }
+                                if sidebar.local_item_count > 0 {
+                                    ui.separator();
+                                    ui.label("Items here");
+                                    for item in build_local_item_action_rows(run, bundle) {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.small(&item.item_name);
+                                            if ui.small_button("Inspect").clicked() {
+                                                queued_command = Some(item.inspect_command.clone());
+                                            }
+                                            if ui.small_button("Take").clicked() {
+                                                queued_command = Some(item.take_command.clone());
+                                            }
+                                        });
+                                    }
+                                }
                             }
-                        }
-                        for status_line in &sidebar.current_location_status_lines {
-                            ui.small(status_line);
-                        }
-                        if let Some(layout) = &map_layout {
                             ui.separator();
-                            ui.label("Map tiles");
-                            render_map_layout(
-                                ui,
-                                layout,
-                                run,
-                                fog_mode,
-                                &mut queued_command,
-                                &mut viewer_request,
-                            );
-                        }
-                        if !sidebar.connected_exits.is_empty() {
-                            ui.separator();
-                            ui.label("Connected exits");
-                            for exit in &sidebar.connected_exits {
-                                if ui
-                                    .button(format!(
-                                        "Go to {}{}",
-                                        exit.destination_name,
+                            ui.label("Known locations");
+                            if let Some(sidebar) = build_game_sidebar(run, bundle) {
+                                for location in &sidebar.known_locations {
+                                    ui.small(format!(
+                                        "{} {}{}",
+                                        location.marker,
+                                        location.location_name,
                                         location_state_suffix(
-                                            exit.locked,
-                                            exit.broken,
-                                            exit.barricaded
+                                            location.locked,
+                                            location.broken,
+                                            location.barricaded
                                         )
-                                    ))
-                                    .clicked()
-                                {
-                                    queued_command = Some(format!("go {}", exit.destination_id));
-                                }
-                                if let Some(route_note) = &exit.route_note {
-                                    ui.small(format!("  {}", route_note));
-                                }
-                                if let Some(threat_forecast) = &exit.threat_forecast {
-                                    ui.small(format!("  forecast: {}", threat_forecast));
+                                    ));
                                 }
                             }
                         }
-                        if sidebar.local_item_count > 0 {
-                            ui.separator();
-                            ui.label("Items here");
-                            for item in build_local_item_action_rows(run, bundle) {
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.small(&item.item_name);
-                                    if ui.small_button("Inspect").clicked() {
-                                        queued_command = Some(item.inspect_command.clone());
-                                    }
-                                    if ui.small_button("Take").clicked() {
-                                        queued_command = Some(item.take_command.clone());
-                                    }
-                                });
-                            }
-                        }
+                    } else {
+                        ui.label("No active run.");
                     }
-                    ui.separator();
-                    ui.label("Known locations");
-                    if let Some(sidebar) = build_game_sidebar(run, bundle) {
-                        for location in &sidebar.known_locations {
-                            ui.small(format!(
-                                "{} {}{}",
-                                location.marker,
-                                location.location_name,
-                                location_state_suffix(
-                                    location.locked,
-                                    location.broken,
-                                    location.barricaded
-                                )
-                            ));
-                        }
-                    }
-                }
-            } else {
-                ui.label("No active run.");
-            }
+                });
         });
 
     egui::SidePanel::right("media_panel")
         .resizable(true)
         .default_width(260.0)
         .show(ctx, |ui| {
-            let display = build_media_panel_display(media_panel);
-            ui.heading("Media");
-            if current_bundle.is_none() {
-                ui.label("No active run.");
-                return;
-            }
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let display = build_media_panel_display(media_panel);
+                    ui.heading("Media");
+                    if current_bundle.is_none() {
+                        ui.label("No active run.");
+                        return;
+                    }
 
             ui.label("Event-aware media placeholder panel");
             ui.separator();
@@ -686,6 +979,28 @@ pub fn show_game_tab(
                 }
             }
 
+            if !media_panel.observed_entity_rows.is_empty() {
+                ui.separator();
+                ui.label("Observable entities");
+                ui.small("Host-confirmed entities at this location. Focus changes presentation only; it never issues an action or changes state.");
+                for entity in &media_panel.observed_entities {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.small(&entity.label);
+                        let label = if media_panel.focused_entity_id.as_deref()
+                            == Some(entity.id.as_str())
+                        {
+                            "Focused"
+                        } else {
+                            "Focus"
+                        };
+                        if ui.small_button(label).clicked() {
+                            focus_entity_id = Some(entity.id.clone());
+                        }
+                    });
+                    ui.small(format!("  {}", entity.detail));
+                }
+            }
+
             if !display.future_hook_rows.is_empty() {
                 ui.separator();
                 ui.label("Future media hooks");
@@ -702,7 +1017,8 @@ pub fn show_game_tab(
                 }
             }
 
-            ui.small("Future datapack image and video hooks can bind to these event-derived cues.");
+                    ui.small("Future datapack image and video hooks can bind to these event-derived cues.");
+                });
         });
 
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -747,7 +1063,7 @@ pub fn show_game_tab(
             });
     });
 
-    (queued_command, viewer_request)
+    (queued_command, viewer_request, focus_entity_id)
 }
 
 pub fn show_inventory_tab(
@@ -765,7 +1081,9 @@ pub fn show_inventory_tab(
             ui.separator();
             let inventory_rows = build_inventory_action_rows(run, Some(bundle));
             for row in inventory_rows {
-                let item = run.inventory.iter().find(|item| item.id == row.item_id);
+                let item = run
+                    .controlled_inventory()
+                    .and_then(|inventory| inventory.iter().find(|item| item.id == row.item_id));
                 let template = bundle
                     .items
                     .iter()
@@ -793,6 +1111,10 @@ pub fn show_inventory_tab(
                                 queued_command = Some(row.use_command.clone());
                             }
 
+                            if ui.small_button("Drop").clicked() {
+                                queued_command = Some(format!("drop {}", row.item_id));
+                            }
+
                             if row.show_view_button
                                 && ui.small_button("View").clicked()
                                 && let (Some(template), Some(item)) = (template, item)
@@ -802,8 +1124,82 @@ pub fn show_inventory_tab(
                             }
                         });
                         ui.small(&row.description_line);
+                        if let Some(actor_contract_line) = &row.actor_contract_line {
+                            ui.small(actor_contract_line);
+                        }
                         if let Some(template_warning) = &row.template_warning {
                             ui.small(template_warning);
+                        }
+                        let grants = run
+                            .ability_grants
+                            .iter()
+                            .filter(|grant| {
+                                matches!(
+                                    &grant.owner,
+                                    crate::game::state::ItemOwner::Entity(owner_id)
+                                        if item.is_some_and(|item| owner_id == &item.instance_id)
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        if !grants.is_empty() {
+                            ui.small("Attached ability grants:");
+                            for grant in &grants {
+                                let name = bundle
+                                    .abilities
+                                    .iter()
+                                    .find(|ability| ability.id == grant.template_id)
+                                    .map(|ability| ability.name.as_str())
+                                    .unwrap_or(grant.template_id.as_str());
+                                let uses = grant.remaining_uses.map_or_else(
+                                    || "infinite uses".to_owned(),
+                                    |uses| format!("{uses} uses"),
+                                );
+                                let expiry = grant.expires_at_turn.map_or_else(
+                                    || "permanent".to_owned(),
+                                    |turn| format!("expires in {} turns", turn.saturating_sub(run.turn_index)),
+                                );
+                                ui.small(format!(
+                                    "  {name}: {uses} | {:?} | {expiry}",
+                                    grant.source
+                                ));
+                            }
+                            let study_grants = grants
+                                .iter()
+                                .filter(|grant| {
+                                    grant.source == crate::game::state::AbilityGrantSource::Item
+                                        && bundle
+                                            .abilities
+                                            .iter()
+                                            .find(|template| template.id == grant.template_id)
+                                            .is_some_and(|template| template.scroll_learnable)
+                                })
+                                .collect::<Vec<_>>();
+                            if let [grant] = study_grants.as_slice() {
+                                let template = bundle
+                                    .abilities
+                                    .iter()
+                                    .find(|template| template.id == grant.template_id)
+                                    .expect("filtered study grant has an authored template");
+                                if crate::game::owner_can_study_scroll_template(
+                                    run,
+                                    bundle,
+                                    &run.controlled_inventory_owner(),
+                                    &template.id,
+                                ) && !crate::game::owner_has_permanent_ability(
+                                    run,
+                                    &run.controlled_inventory_owner(),
+                                    &template.id,
+                                ) {
+                                    if ui.small_button("Study").clicked() {
+                                        queued_command = Some(format!("learn {}", row.item_id));
+                                    }
+                                } else {
+                                    ui.small(format!(
+                                        "Study {}: requires matching permanent literacy.",
+                                        template.name
+                                    ));
+                                }
+                            }
                         }
                     });
                 });
@@ -880,11 +1276,414 @@ pub fn show_asset_viewer(ctx: &egui::Context, request: &AssetViewerRequest) -> b
     open && !should_close
 }
 
+pub fn show_library_tab(
+    ctx: &egui::Context,
+    datapack_id: Option<&str>,
+    state: &mut LibraryUiState,
+) {
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.heading("Player Library");
+        ui.small("Player-owned templates and tagged media; authored datapacks remain unchanged.");
+        if let Some(feedback) = &state.feedback {
+            ui.colored_label(
+                if feedback.is_error { egui::Color32::LIGHT_RED } else { egui::Color32::LIGHT_GREEN },
+                &feedback.message,
+            );
+        }
+        let Some(datapack_id) = datapack_id else {
+            ui.label("Start a run to view compatible entries.");
+            return;
+        };
+        match crate::collection::load_collection_items_for_datapack(datapack_id) {
+            Ok(items) if items.is_empty() => {
+                ui.label("No saved narrator templates for this datapack.");
+            }
+            Ok(items) => {
+                for item in items {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new(&item.name).strong());
+                        ui.small(&item.description);
+                        ui.small(player_template_library_summary(&item));
+                        if let Some(capability_summary) = player_template_capability_summary(&item)
+                        {
+                            ui.small(capability_summary);
+                        }
+                        if let Some(media_summary) = player_template_media_summary(&item) {
+                            ui.small(media_summary);
+                        }
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(if item.enabled { "Disable" } else { "Enable" })
+                                .clicked()
+                            {
+                                state.feedback = action_feedback(crate::collection::set_collection_item_enabled(
+                                    &item.id,
+                                    !item.enabled,
+                                ), if item.enabled { "Template disabled." } else { "Template enabled." });
+                                ctx.request_repaint();
+                            }
+                            if ui.button("Edit tags").clicked() {
+                                state.editing_tags = Some(LibraryTagEdit {
+                                    target: LibraryTagTarget::Template(item.id.clone()),
+                                    text: item.tags.join(", "),
+                                });
+                            }
+                            if ui.button("Edit media").clicked() {
+                                state.editing_template_media = Some(LibraryTemplateMediaEdit {
+                                    template_id: item.id.clone(),
+                                    image: item
+                                        .media_references
+                                        .image
+                                        .clone()
+                                        .unwrap_or_default(),
+                                    motion: item
+                                        .media_references
+                                        .motion
+                                        .clone()
+                                        .unwrap_or_default(),
+                                    audio: item
+                                        .media_references
+                                        .audio
+                                        .clone()
+                                        .unwrap_or_default(),
+                                });
+                            }
+                            if ui.button("Remove").clicked() {
+                                state.pending_removal = Some(LibraryRemovalTarget::Template {
+                                    id: item.id.clone(),
+                                    name: item.name.clone(),
+                                });
+                            }
+                        });
+                    });
+                }
+            }
+            Err(error) => {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+        }
+        ui.separator();
+        ui.label("Tagged media pool");
+        ui.small("Import a local image, GIF/video, or audio file. The library stores only its path and tags.");
+        ui.horizontal(|ui| {
+            ui.label("File");
+            ui.add(egui::TextEdit::singleline(&mut state.import_path).hint_text("C:\\media\\artifact.png"));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Tags");
+            ui.add(egui::TextEdit::singleline(&mut state.import_tags).hint_text("weapon, neon"));
+            if ui.button("Import local file").clicked() {
+                let result = crate::media_pool::add_media_asset(
+                    state.import_path.clone(),
+                    comma_tags(&state.import_tags),
+                );
+                let succeeded = result.is_ok();
+                state.feedback = action_feedback(result, "Media asset imported.");
+                if succeeded {
+                    state.import_path.clear();
+                    state.import_tags.clear();
+                }
+                ctx.request_repaint();
+            }
+        });
+        match crate::media_pool::load_player_media_pool() {
+            Ok(pool) if pool.assets.is_empty() => {
+                ui.small("No player media assets configured yet.");
+            }
+            Ok(pool) => {
+                for asset in pool.assets {
+                    ui.horizontal_wrapped(|ui| {
+                        let file_present = std::path::Path::new(&asset.path).is_file();
+                        if asset.kind == crate::media_pool::PlayerMediaKind::Image && file_present {
+                            ui.add(
+                                egui::Image::from_uri(local_file_uri(&asset.path))
+                                    .fit_to_exact_size(egui::vec2(48.0, 48.0)),
+                            );
+                        }
+                        ui.small(format!(
+                            "{:?}: {} [{}] | {} | {}",
+                            asset.kind,
+                            asset.path,
+                            asset.tags.join(", "),
+                            if asset.enabled { "enabled" } else { "disabled" },
+                            if file_present { "file present" } else { "MISSING FILE" }
+                        ));
+                        if ui
+                            .button(if asset.enabled { "Disable" } else { "Enable" })
+                            .clicked()
+                        {
+                            state.feedback = action_feedback(crate::media_pool::set_media_asset_enabled(
+                                &asset.path,
+                                !asset.enabled,
+                            ), if asset.enabled { "Media asset disabled." } else { "Media asset enabled." });
+                            ctx.request_repaint();
+                        }
+                        if ui.button("Edit tags").clicked() {
+                            state.editing_tags = Some(LibraryTagEdit {
+                                target: LibraryTagTarget::Media(asset.path.clone()),
+                                text: asset.tags.join(", "),
+                            });
+                        }
+                        if ui.button("Remove").clicked() {
+                            state.pending_removal = Some(LibraryRemovalTarget::Media {
+                                path: asset.path.clone(),
+                            });
+                        }
+                    });
+                }
+            }
+            Err(error) => {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+        }
+
+        show_library_tag_editor(ctx, state);
+        show_library_template_media_editor(ctx, state);
+        show_library_remove_confirmation(ctx, state);
+    });
+}
+
+fn player_template_library_summary(template: &PlayerTemplate) -> String {
+    let kind = match template.kind {
+        PlayerTemplateKind::Item => "Item",
+        PlayerTemplateKind::Weapon => "Weapon",
+        PlayerTemplateKind::Status => "Status",
+        PlayerTemplateKind::Effect => "Effect",
+        PlayerTemplateKind::Npc => "NPC",
+        PlayerTemplateKind::Enemy => "Enemy",
+        PlayerTemplateKind::Boss => "Boss",
+        PlayerTemplateKind::Objective => "Objective",
+        PlayerTemplateKind::Location => "Location",
+        PlayerTemplateKind::TemporaryExit => "Temporary exit",
+    };
+    let mechanics = match template.effective_mechanics() {
+        PlayerTemplateMechanics::Item { damage, condition } => match condition {
+            Some(condition) => format!("damage {damage} | condition: {condition}"),
+            None => format!("damage {damage}"),
+        },
+        PlayerTemplateMechanics::Status {
+            trigger,
+            duration,
+            additive_damage,
+            additive_healing,
+            ..
+        } => format!(
+            "trigger: {trigger} | duration: {duration} | damage {additive_damage:+} | healing {additive_healing:+}"
+        ),
+        PlayerTemplateMechanics::Npc { faction } => format!("faction: {faction}"),
+        PlayerTemplateMechanics::Enemy { max_hp, damage }
+        | PlayerTemplateMechanics::Boss { max_hp, damage } => {
+            format!("HP {max_hp} | damage {damage}")
+        }
+        PlayerTemplateMechanics::Objective { completion_key } => {
+            format!("completion key: {completion_key}")
+        }
+        PlayerTemplateMechanics::Location {
+            location_id,
+            initially_known,
+        } => format!(
+            "location: {location_id} | {}",
+            if initially_known { "known" } else { "hidden" }
+        ),
+        PlayerTemplateMechanics::TemporaryExit {
+            from_location_id,
+            to_location_id,
+            locked,
+        } => format!(
+            "{from_location_id} -> {to_location_id} | {}",
+            if locked { "locked" } else { "open" }
+        ),
+    };
+    format!(
+        "{kind} | {mechanics} | Tags: {} | {}",
+        if template.tags.is_empty() {
+            "none".to_owned()
+        } else {
+            template.tags.join(", ")
+        },
+        if template.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    )
+}
+
+fn player_template_capability_summary(template: &PlayerTemplate) -> Option<String> {
+    let actor = template.actor.as_ref()?;
+    let capabilities = if actor.capabilities.is_empty() {
+        "none".to_owned()
+    } else {
+        actor.capabilities.join(", ")
+    };
+    Some(format!(
+        "Actor contract: {capabilities} | disposition: {:?}",
+        template.disposition
+    ))
+}
+
+fn player_template_media_summary(template: &PlayerTemplate) -> Option<String> {
+    let mut kinds = Vec::new();
+    if template.media_references.image.is_some() {
+        kinds.push("image");
+    }
+    if template.media_references.motion.is_some() {
+        kinds.push("motion");
+    }
+    if template.media_references.audio.is_some() {
+        kinds.push("audio");
+    }
+    (!kinds.is_empty()).then(|| format!("Exact media: {}", kinds.join(", ")))
+}
+
+fn comma_tags(value: &str) -> Vec<String> {
+    value.split(',').map(str::to_owned).collect()
+}
+
+fn action_feedback(result: Result<(), String>, success: &str) -> Option<LibraryFeedback> {
+    Some(match result {
+        Ok(()) => LibraryFeedback {
+            message: success.to_owned(),
+            is_error: false,
+        },
+        Err(error) => LibraryFeedback {
+            message: format!("Library update failed: {error}"),
+            is_error: true,
+        },
+    })
+}
+
+fn show_library_tag_editor(ctx: &egui::Context, state: &mut LibraryUiState) {
+    let Some(editor) = state.editing_tags.as_mut() else {
+        return;
+    };
+    let mut close = false;
+    egui::Window::new("Edit library tags")
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.label("Comma-separated tags");
+            ui.add(egui::TextEdit::singleline(&mut editor.text).desired_width(320.0));
+            ui.horizontal(|ui| {
+                if ui.button("Save tags").clicked() {
+                    let result = match &editor.target {
+                        LibraryTagTarget::Template(id) => {
+                            crate::collection::set_collection_item_tags(
+                                id,
+                                comma_tags(&editor.text),
+                            )
+                        }
+                        LibraryTagTarget::Media(path) => {
+                            crate::media_pool::set_media_asset_tags(path, comma_tags(&editor.text))
+                        }
+                    };
+                    state.feedback = action_feedback(result, "Tags saved.");
+                    close = true;
+                    ctx.request_repaint();
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+    if close {
+        state.editing_tags = None;
+    }
+}
+
+fn show_library_template_media_editor(ctx: &egui::Context, state: &mut LibraryUiState) {
+    let Some(editor) = state.editing_template_media.as_mut() else {
+        return;
+    };
+    let mut close = false;
+    egui::Window::new("Edit template media")
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.small(
+                "Optional exact local paths. A configured path takes priority over tagged pool media; leave a field blank to use the pool.",
+            );
+            ui.label("Image");
+            ui.add(egui::TextEdit::singleline(&mut editor.image).desired_width(440.0));
+            ui.label("GIF/video");
+            ui.add(egui::TextEdit::singleline(&mut editor.motion).desired_width(440.0));
+            ui.label("Audio");
+            ui.add(egui::TextEdit::singleline(&mut editor.audio).desired_width(440.0));
+            ui.horizontal(|ui| {
+                if ui.button("Save media").clicked() {
+                    state.feedback = action_feedback(
+                        crate::collection::set_collection_item_media_references(
+                            &editor.template_id,
+                            crate::collection::PlayerTemplateMediaReferences {
+                                image: Some(editor.image.clone()),
+                                motion: Some(editor.motion.clone()),
+                                audio: Some(editor.audio.clone()),
+                            },
+                        ),
+                        "Template media saved.",
+                    );
+                    close = true;
+                    ctx.request_repaint();
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+    if close {
+        state.editing_template_media = None;
+    }
+}
+
+fn show_library_remove_confirmation(ctx: &egui::Context, state: &mut LibraryUiState) {
+    let Some(target) = state.pending_removal.as_ref() else {
+        return;
+    };
+    let label = match target {
+        LibraryRemovalTarget::Template { name, .. } => format!("template '{name}'"),
+        LibraryRemovalTarget::Media { path } => format!("media asset '{path}'"),
+    };
+    let mut remove = false;
+    let mut cancel = false;
+    egui::Window::new("Remove from player library?")
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.label(format!("Remove {label}? This cannot be undone."));
+            ui.horizontal(|ui| {
+                if ui.button("Remove").clicked() {
+                    remove = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+    if remove {
+        let result = match state
+            .pending_removal
+            .as_ref()
+            .expect("removal target exists")
+        {
+            LibraryRemovalTarget::Template { id, .. } => {
+                crate::collection::remove_collection_item(id)
+            }
+            LibraryRemovalTarget::Media { path } => crate::media_pool::remove_media_asset(path),
+        };
+        state.feedback = action_feedback(result, "Library entry removed.");
+        state.pending_removal = None;
+        ctx.request_repaint();
+    } else if cancel {
+        state.pending_removal = None;
+    }
+}
+
 pub fn show_character_tab(
     ctx: &egui::Context,
     current_run: Option<&RunState>,
     current_bundle: Option<&DatapackBundle>,
-) -> Option<AssetViewerRequest> {
+) -> (Option<String>, Option<AssetViewerRequest>) {
+    let mut queued_command = None;
     let mut viewer_request = None;
 
     egui::CentralPanel::default().show(ctx, |ui| {
@@ -920,6 +1719,133 @@ pub fn show_character_tab(
             ui.small(&summary.active_objective_description);
             for row in &summary.objective_condition_rows {
                 ui.small(row);
+            }
+            ui.separator();
+            ui.label("Abilities and progression");
+            let controlled_actor = run.runtime_actor(&run.player_entity_id);
+            let player_tags = controlled_actor
+                .as_ref()
+                .map(|actor| actor.tags.clone())
+                .unwrap_or_else(|| run.player_tags.clone());
+            let player_tags = if player_tags.is_empty() {
+                "none".to_owned()
+            } else {
+                player_tags.join(", ")
+            };
+            ui.small(format!("Access tags: {player_tags}"));
+            let progress_pools = run.progress_pools_for_actor(&run.player_entity_id);
+            if progress_pools.is_empty() {
+                ui.small("Progress: none yet");
+            } else {
+                let mut sorted_progress_pools = progress_pools.iter().collect::<Vec<_>>();
+                sorted_progress_pools.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+                for (pool, total) in sorted_progress_pools {
+                    let level = current_bundle
+                        .map(|bundle| crate::game::skill_level_for_progress(bundle, pool, *total))
+                        .unwrap_or_default();
+                    ui.small(format!("{pool} XP: {total} | level {level}"));
+                }
+            }
+            let player_id = &run.player_entity_id;
+            let grants = run
+                .ability_grants
+                .iter()
+                .filter(|grant| run.ability_grant_is_accessible_to(grant, player_id))
+                .collect::<Vec<_>>();
+            if grants.is_empty() {
+                ui.small("Abilities: none available");
+            } else {
+                for grant in grants {
+                    let usable = current_bundle.is_some_and(|bundle| {
+                        crate::game::ability_grant_is_usable_by(run, bundle, grant, player_id)
+                    });
+                    let template = current_bundle.and_then(|bundle| {
+                        bundle
+                            .abilities
+                            .iter()
+                            .find(|template| template.id == grant.template_id)
+                    });
+                    let name = template.map_or(grant.template_id.as_str(), |template| template.name.as_str());
+                    let uses = grant
+                        .remaining_uses
+                        .map_or("infinite".to_owned(), |uses| uses.to_string());
+                    let owner = match &grant.owner {
+                        crate::game::state::ItemOwner::Player => "you".to_owned(),
+                        crate::game::state::ItemOwner::Entity(id) => format!("carried by {id}"),
+                        crate::game::state::ItemOwner::Location(id) => format!("at {id}"),
+                    };
+                    let expiry = grant.expires_at_turn.map_or_else(
+                        || "permanent".to_owned(),
+                        |turn| format!("expires in {} turns", turn.saturating_sub(run.turn_index)),
+                    );
+                    let cooldown = crate::game::ability_grant_cooldown_remaining(run, grant);
+                    let cooldown = if cooldown == 0 {
+                        "ready".to_owned()
+                    } else {
+                        format!("cooldown: {cooldown} world turn(s)")
+                    };
+                    ui.small(format!(
+                        "{name}: {uses} uses | {owner} | {:?} | {expiry} | {cooldown}",
+                        grant.source,
+                    ));
+                    if let Some(template) = template {
+                        if usable {
+                            ui.small(format!("Cast: `cast {} at <target>`", template.id));
+                        } else {
+                            let reason = current_bundle
+                                .and_then(|bundle| {
+                                    crate::game::ability_grant_unavailability_reason(
+                                        run, bundle, grant, player_id,
+                                    )
+                                })
+                                .unwrap_or_else(|| "ability data is unavailable".to_owned());
+                            ui.small(format!("Unavailable: {reason}."));
+                        }
+                    }
+                }
+            }
+            if let Some(bundle) = current_bundle {
+                let owner = run.controlled_inventory_owner();
+                let actor_tags = controlled_actor
+                    .as_ref()
+                    .map(|actor| actor.tags.as_slice())
+                    .unwrap_or(&run.player_tags);
+                let unlocks = bundle
+                    .abilities
+                    .iter()
+                    .filter(|template| {
+                        crate::game::owner_has_unlock_choice_for_template(
+                            run,
+                            bundle,
+                            &owner,
+                            &template.id,
+                        )
+                            && template.required_tags.iter().all(|tag| {
+                                actor_tags
+                                    .iter()
+                                    .any(|owned| owned.eq_ignore_ascii_case(tag))
+                            })
+                            && !crate::game::owner_has_permanent_ability(
+                                run,
+                                &owner,
+                                &template.id,
+                            )
+                    })
+                    .collect::<Vec<_>>();
+                if !unlocks.is_empty() {
+                    ui.small("Available unlocks:");
+                    for template in unlocks {
+                        ui.horizontal(|ui| {
+                            ui.small(format!(
+                                "{} ({} {} XP)",
+                                template.name, template.required_xp, template.progress_pool
+                            ));
+                            if ui.button("Learn").clicked() {
+                                queued_command = Some(format!("learn {}", template.id));
+                            }
+                        });
+                    }
+                }
             }
             if !summary.utility_relevance_rows.is_empty() {
                 ui.separator();
@@ -999,7 +1925,10 @@ pub fn show_character_tab(
 
                 if let Some(equipped_item_id) = &summary.equipped_item_id
                     && let Some(inventory_item) =
-                        run.inventory.iter().find(|item| item.id == *equipped_item_id)
+                        run.entity_inventory(&run.controlled_inventory_owner())
+                            .and_then(|inventory| {
+                                inventory.iter().find(|item| item.id == *equipped_item_id)
+                            })
                     && let Some(template) = bundle
                         .items
                         .iter()
@@ -1017,7 +1946,7 @@ pub fn show_character_tab(
         ui.small("This tab is where future skills, sanity, mana, or other scenario-specific stats can expand cleanly.");
     });
 
-    viewer_request
+    (queued_command, viewer_request)
 }
 
 pub fn show_diagnostics_tab(ctx: &egui::Context, report: &DiagnosticReport) {
@@ -1096,6 +2025,29 @@ pub fn show_diagnostics_tab(ctx: &egui::Context, report: &DiagnosticReport) {
                         }
                     });
             }
+        }
+
+        ui.separator();
+        ui.label("Player library health");
+        if report.player_library_report.template_rows.is_empty()
+            && report.player_library_report.media_rows.is_empty()
+            && report.player_library_report.errors.is_empty()
+        {
+            ui.small("No compatible player templates or player media entries.");
+        }
+        for row in &report.player_library_report.template_rows {
+            ui.small(row);
+        }
+        for row in &report.player_library_report.media_rows {
+            let color = if row.contains("MISSING FILE") {
+                egui::Color32::LIGHT_RED
+            } else {
+                ui.visuals().text_color()
+            };
+            ui.colored_label(color, row);
+        }
+        for error in &report.player_library_report.errors {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
 
         ui.separator();
@@ -1736,4 +2688,51 @@ fn show_datapack_status(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::collection::{
+        PlayerTemplate, PlayerTemplateAdmission, PlayerTemplateKind, PlayerTemplateMechanics,
+        PlayerTemplateMediaReferences,
+    };
+    use crate::game::{ActorDisposition, ActorState};
+
+    use super::{player_template_capability_summary, player_template_library_summary};
+
+    #[test]
+    fn library_summary_preserves_typed_mechanics_and_actor_contract() {
+        let template = PlayerTemplate {
+            id: "fixture_npc".to_owned(),
+            kind: PlayerTemplateKind::Npc,
+            name: "Fixture Guide".to_owned(),
+            description: "A UI fixture.".to_owned(),
+            damage: 0,
+            condition: None,
+            mechanics: Some(PlayerTemplateMechanics::Npc {
+                faction: "helpers".to_owned(),
+            }),
+            tags: vec!["guide".to_owned()],
+            actor: Some(ActorState::configured(
+                Some(8),
+                Some(3),
+                true,
+                true,
+                true,
+                true,
+            )),
+            disposition: ActorDisposition::Friendly,
+            source_datapack_id: "fixture".to_owned(),
+            enabled: true,
+            provenance: "narrator_approved".to_owned(),
+            admission: PlayerTemplateAdmission::default(),
+            media_references: PlayerTemplateMediaReferences::default(),
+        };
+
+        assert!(player_template_library_summary(&template).contains("NPC | faction: helpers"));
+        let contract = player_template_capability_summary(&template)
+            .expect("actor-capable template has a contract summary");
+        assert!(contract.contains("combat"));
+        assert!(contract.contains("Friendly"));
+    }
 }

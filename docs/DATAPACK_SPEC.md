@@ -32,7 +32,7 @@ The goal is not to support infinite flexibility immediately. The goal is to make
 
 ## Folder Layout
 
-Recommended `v0.1` layout:
+Current supported layout:
 
 ```text
 assets/
@@ -43,9 +43,11 @@ assets/
       templates/
         locations.toml
         items.toml
+        npcs.toml
         enemies.toml
         bosses.toml
         objectives.toml
+        abilities.toml
       media/
         images/
           locations/
@@ -75,7 +77,7 @@ This structure should stay visible and understandable to future contributors and
 
 ## Required Files
 
-For `v0.1`, a playable datapack should include:
+For the historical `v0.1` scenario, a playable datapack included:
 
 - `pack.toml`
 - `rules.toml`
@@ -85,9 +87,11 @@ For `v0.1`, a playable datapack should include:
 - `templates/bosses.toml`
 - `templates/objectives.toml`
 
-Optional or lightly used in `v0.1`:
+Current optional content files and lanes:
 
 - NPC templates
+- `templates/abilities.toml` for immutable ability definitions; see
+  [ABILITY_GRANTS_SPEC.md](ABILITY_GRANTS_SPEC.md)
 - ambient event templates
 - audio references
 - video references
@@ -150,15 +154,58 @@ Finale-security fields are generic. A datapack may use them to say that securing
 
 Template files define the canonical content pool for the scenario.
 
-At minimum, `v0.1` should support templates for:
+The current host supports templates for:
 
 - locations
 - items
+- NPCs
 - enemies
 - bosses
 - objectives
+- abilities
 
-NPCs and ambient events may be optional or minimal in the first release.
+An ability definition is immutable content. Charges, cooldowns, expiry, owner, and source belong
+to a runtime `AbilityGrant`, never to the shared ability template. A content author should not use
+template tags or fields as a mutable per-owner charge counter.
+
+Ambient events may be optional or minimal in the first release.
+
+## NPC Templates
+
+`templates/npcs.toml` is optional. Each `[[npcs]]` entry has `id`, `name`, `description`, `tags`,
+optional `narrator_brief`, and optional media references. Add an NPC id to a location's `npcs` list
+to place it.
+
+NPCs use explicit authoring fields rather than magic tags:
+
+- `disposition = "friendly" | "neutral" | "hostile"` (defaults to `neutral`)
+- `faction = "..."`
+- `quest_objective_ids = ["existing_objective_id"]`
+- `[npcs.actor]` with optional `hp`, `damage`, `can_hear`, `can_see`, `can_move`, and `combat`
+
+The same actor fields are an implementation-facing compatibility surface; mechanically, the host
+canonicalises them into the generic capability registry and its dependent contracts. Capability
+enablement reveals only the applicable authored/proposal fields. It does not create a special
+`NPC` mechanics family.
+
+A hostile NPC becomes a combat target only when `actor.combat = true` and valid actor health/damage
+are supplied. Friendly and neutral NPCs do not become hostile merely because they have HP. Quest
+references are validated against authored objectives and surface as NPC/narrator context; they do
+not create a second quest engine. `can_move` and perception values use the shared actor state.
+
+### Host Capability Selection
+
+`items`, `npcs`, `enemies`, and `bosses` may declare a top-level `capabilities = [...]` list.
+These are stable identifiers from the host engine's capability registry, not pack-defined tags or
+executable gameplay hooks. Current actor capabilities are `health`, `combat`, `hearing`, `sight`,
+`movement`, `noise_spawn`, `noise_track`, and `sight_track`; their parameters and prerequisites
+are validated by the host. A pack can compose them, but cannot define a private combat, spawn, or
+movement system. `behavior_tags` is accepted as a backwards-compatible input alias only.
+
+Enemies with no capability selection retain their compatibility defaults. NPCs and bosses must opt
+in. An item that selects `noise_spawn` and meets the actor prerequisites materializes as a distinct
+world-item instance in the same host-owned pool; ordinary items remain inert. A missing engine
+capability is a host feature request, never a reason to emulate state in pack prose.
 
 ## Common Template Fields
 

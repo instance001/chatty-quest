@@ -13,6 +13,7 @@ pub(super) fn handle_wait(state: &mut RunState, bundle: &DatapackBundle) -> Acti
         .unwrap_or_else(|| state.current_location_id.clone());
 
     let mut events = vec![GameEvent::Waited {
+        origin_id: state.player_entity_id.clone(),
         location_id: state.current_location_id.clone(),
     }];
     let mut lines = vec![format!(
@@ -20,8 +21,14 @@ pub(super) fn handle_wait(state: &mut RunState, bundle: &DatapackBundle) -> Acti
         location_name
     )];
 
-    if let Some(location) = location.as_ref() {
+    if state.controlled_actor_is_alive()
+        && let Some(location) = location.as_ref()
+    {
         apply_location_passive_pressure(state, location, &mut events, &mut lines);
+    } else if !state.controlled_actor_is_alive() {
+        lines.push(
+            "You remain incapacitated while the rest of the world takes its turn.".to_owned(),
+        );
     }
 
     ActionOutcome { events, lines }
@@ -48,10 +55,18 @@ fn apply_location_passive_pressure(
     }
 
     let pressure = exposed_noise_pressure_damage(state);
-    state.hp = (state.hp - pressure).max(0);
+    let target_id = state.player_entity_id.clone();
+    let Ok((_, applied, remaining_hp, maximum_hp)) =
+        state.damage_runtime_actor_health(&target_id, pressure)
+    else {
+        lines.push("The pressure cannot harm the controlled actor's current contract.".to_owned());
+        return;
+    };
     events.push(GameEvent::DamageTaken {
-        amount: pressure,
-        remaining_hp: state.hp,
+        origin_id: enemy_id.to_owned(),
+        target_id,
+        amount: applied,
+        remaining_hp,
     });
     if let Some(line) = location.passive_pressure_damage_line.as_deref() {
         lines.push(line.to_owned());
@@ -61,5 +76,5 @@ fn apply_location_passive_pressure(
     {
         lines.push(line.to_owned());
     }
-    lines.push(format!("HP is now {} / {}.", state.hp, state.max_hp));
+    lines.push(format!("HP is now {} / {}.", remaining_hp, maximum_hp));
 }

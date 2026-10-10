@@ -13,6 +13,9 @@ Thumbs.db
 /runtime/exports/*
 /runtime/logs/*
 /runtime/saves/*
+/runtime/bin/
+/runtime/*.zip
+/models/local/*.gguf
 
 !/runtime/cache/README.md
 !/runtime/config/README.md

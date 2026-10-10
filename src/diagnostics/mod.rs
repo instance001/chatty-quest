@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::app_paths;
+use crate::collection::load_player_templates_for_datapack;
 use crate::data::datapacks::{
     DatapackBundle, DatapackCatalog, MediaReferences, resolve_media_assets,
 };
@@ -10,6 +11,7 @@ use crate::game::derived::{
     security_summary_rows, utility_relevance_rows,
 };
 use crate::game::{GameEvent, RunState};
+use crate::media_pool::load_player_media_pool;
 
 #[derive(Clone)]
 pub struct DiagnosticReport {
@@ -25,12 +27,20 @@ pub struct DiagnosticReport {
     pub template_counts: Option<TemplateCounts>,
     pub presentation_coverage: Option<PresentationCoverage>,
     pub media_asset_report: Option<MediaAssetReport>,
+    pub player_library_report: PlayerLibraryReport,
     pub invalid_datapacks_detail: Vec<InvalidDatapackReport>,
     pub run_health: Option<RunHealthReport>,
     pub environment_checks: Vec<EnvironmentCheck>,
     pub warnings: Vec<DiagnosticMessage>,
     pub event_counters: EventCounters,
     pub recent_events: Vec<String>,
+}
+
+#[derive(Clone, Default)]
+pub struct PlayerLibraryReport {
+    pub template_rows: Vec<String>,
+    pub media_rows: Vec<String>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -85,6 +95,12 @@ pub struct RunHealthReport {
     pub security_summary_rows: Vec<String>,
     pub attractor_summary_rows: Vec<String>,
     pub inventory_items: usize,
+    pub active_status_effects: usize,
+    pub consumed_status_effects: usize,
+    pub active_npcs: usize,
+    pub additional_active_objectives: usize,
+    pub active_temporary_exits: usize,
+    pub player_media_enabled: bool,
     pub known_locations: usize,
     pub live_enemies: usize,
     pub live_bosses: usize,
@@ -254,45 +270,80 @@ pub fn build_diagnostic_report(
     });
 
     let media_asset_report = current_bundle.map(build_media_asset_report);
+    let player_library_report = build_player_library_report(current_bundle);
 
-    let run_health = current_run.map(|run| RunHealthReport {
-        run_phase: run_phase_label(run).to_owned(),
-        location_id: run.current_location_id.clone(),
-        hp: run.hp,
-        max_hp: run.max_hp,
-        noise_level: run.noise_level,
-        objective_complete: run.active_objective.completed,
-        objective_condition_rows: objective_condition_rows(
-            run,
-            current_bundle,
-            ObjectiveConditionRowStyle::Diagnostic,
-        ),
-        utility_relevance_rows: utility_relevance_rows(run, current_bundle),
-        security_summary_rows: security_summary_rows(run, current_bundle),
-        attractor_summary_rows: attractor_summary_rows(run, current_bundle),
-        inventory_items: run.inventory.len(),
-        known_locations: run.known_locations.len(),
-        live_enemies: run.enemies_alive.len(),
-        live_bosses: run.bosses_alive.len(),
-        locked_locations: {
-            let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
-            locked.sort();
-            locked
-        },
-        broken_locked_locations: {
-            let mut broken = run
-                .broken_locked_locations
+    let run_health = current_run.map(|run| {
+        let (hp, max_hp) = run.controlled_actor_health();
+        RunHealthReport {
+            run_phase: run_phase_label(run).to_owned(),
+            location_id: run.current_location_id.clone(),
+            hp,
+            max_hp,
+            noise_level: run.noise_level,
+            objective_complete: run.active_objective.completed,
+            objective_condition_rows: objective_condition_rows(
+                run,
+                current_bundle,
+                ObjectiveConditionRowStyle::Diagnostic,
+            ),
+            utility_relevance_rows: utility_relevance_rows(run, current_bundle),
+            security_summary_rows: security_summary_rows(run, current_bundle),
+            attractor_summary_rows: attractor_summary_rows(run, current_bundle),
+            inventory_items: run.controlled_inventory().map_or(0, Vec::len),
+            active_status_effects: run
+                .status_effects
                 .iter()
-                .cloned()
-                .collect::<Vec<_>>();
-            broken.sort();
-            broken
-        },
-        barricaded_locations: {
-            let mut barricaded = run.barricaded_locations.iter().cloned().collect::<Vec<_>>();
-            barricaded.sort();
-            barricaded
-        },
+                .filter(|effect| matches!(effect.lifecycle, crate::game::InstanceLifecycle::Active))
+                .count(),
+            consumed_status_effects: run
+                .status_effects
+                .iter()
+                .filter(|effect| {
+                    matches!(effect.lifecycle, crate::game::InstanceLifecycle::Consumed)
+                })
+                .count(),
+            active_npcs: run
+                .location_npcs
+                .values()
+                .flatten()
+                .filter(|npc| matches!(npc.lifecycle, crate::game::InstanceLifecycle::Active))
+                .count(),
+            additional_active_objectives: run
+                .additional_objectives
+                .iter()
+                .filter(|objective| {
+                    matches!(objective.lifecycle, crate::game::InstanceLifecycle::Active)
+                })
+                .count(),
+            active_temporary_exits: run
+                .temporary_exits
+                .iter()
+                .filter(|exit| matches!(exit.lifecycle, crate::game::InstanceLifecycle::Active))
+                .count(),
+            player_media_enabled: run.player_media_enabled,
+            known_locations: run.known_locations.len(),
+            live_enemies: run.enemies_alive.len(),
+            live_bosses: run.bosses_alive.len(),
+            locked_locations: {
+                let mut locked = run.locked_locations.iter().cloned().collect::<Vec<_>>();
+                locked.sort();
+                locked
+            },
+            broken_locked_locations: {
+                let mut broken = run
+                    .broken_locked_locations
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                broken.sort();
+                broken
+            },
+            barricaded_locations: {
+                let mut barricaded = run.barricaded_locations.iter().cloned().collect::<Vec<_>>();
+                barricaded.sort();
+                barricaded
+            },
+        }
     });
 
     let environment_checks = [
@@ -325,6 +376,7 @@ pub fn build_diagnostic_report(
         presentation_coverage,
         invalid_datapacks_detail,
         media_asset_report,
+        player_library_report,
         run_health,
         environment_checks,
         warnings: collect_diagnostic_warnings(
@@ -338,6 +390,51 @@ pub fn build_diagnostic_report(
         event_counters: event_counters(recent_events),
         recent_events: recent_events.iter().rev().map(format_game_event).collect(),
     }
+}
+
+fn build_player_library_report(current_bundle: Option<&DatapackBundle>) -> PlayerLibraryReport {
+    let mut report = PlayerLibraryReport::default();
+    if let Some(bundle) = current_bundle {
+        match load_player_templates_for_datapack(&bundle.pack.id) {
+            Ok(items) => report.template_rows = items
+                .into_iter()
+                .map(|item| {
+                    format!(
+                        "Template {} ({}) | {} | tags: {} | controls: enable/disable, edit, remove",
+                        item.name,
+                        item.id,
+                        if item.enabled { "enabled" } else { "disabled" },
+                        item.tags.join(", ")
+                    )
+                })
+                .collect(),
+            Err(error) => report
+                .errors
+                .push(format!("Player template library: {error}")),
+        }
+    }
+    match load_player_media_pool() {
+        Ok(pool) => report.media_rows = pool
+            .assets
+            .into_iter()
+            .map(|asset| {
+                format!(
+                    "Media {:?}: {} | {} | {} | tags: {} | controls: enable/disable, edit, remove",
+                    asset.kind,
+                    asset.path,
+                    if asset.enabled { "enabled" } else { "disabled" },
+                    if Path::new(&asset.path).is_file() {
+                        "file present"
+                    } else {
+                        "MISSING FILE"
+                    },
+                    asset.tags.join(", ")
+                )
+            })
+            .collect(),
+        Err(error) => report.errors.push(format!("Player media library: {error}")),
+    }
+    report
 }
 
 fn media_reference_count(media: &crate::data::datapacks::MediaReferences) -> usize {
@@ -468,10 +565,10 @@ fn collect_diagnostic_warnings(
         }
     }
     if let Some(run) = current_run {
-        if run.hp <= 0 {
+        if !run.controlled_actor_is_alive() {
             warnings.push(DiagnosticMessage::info(
                 DiagnosticArea::Run,
-                "Current run is in a loss state.",
+                "The controlled actor is incapacitated at 0 HP; ordinary actions are blocked until revival.",
             ));
         }
         if run.active_objective.completed {
@@ -533,12 +630,25 @@ fn event_counters(events: &[GameEvent]) -> EventCounters {
     for event in events {
         match event {
             GameEvent::Moved { .. } => counters.moves += 1,
-            GameEvent::AttackResolved { .. } | GameEvent::AttackWhiff => counters.attacks += 1,
-            GameEvent::ItemTaken { .. } => counters.items_taken += 1,
-            GameEvent::ItemUsed { .. } => counters.items_used += 1,
+            GameEvent::AttackResolved { .. } | GameEvent::AttackWhiff { .. } => {
+                counters.attacks += 1
+            }
+            GameEvent::ItemTaken { .. }
+            | GameEvent::ItemTransferred {
+                origin: crate::game::state::ItemOwner::Location(_),
+                ..
+            } => counters.items_taken += 1,
+            GameEvent::ItemUsed { .. } | GameEvent::ItemConsumed { .. } => counters.items_used += 1,
             GameEvent::Waited { .. } => counters.waits += 1,
             GameEvent::RunWon => counters.wins += 1,
-            GameEvent::RunLost => counters.losses += 1,
+            GameEvent::RunLost { .. } => counters.losses += 1,
+            GameEvent::NarratorItemAdmitted { .. } => {}
+            GameEvent::NarratorStatusAdmitted { .. } => {}
+            GameEvent::NarratorNpcAdmitted { .. } => {}
+            GameEvent::NarratorEnemyAdmitted { .. } => {}
+            GameEvent::NarratorBossAdmitted { .. } => {}
+            GameEvent::NarratorTemporaryExitAdmitted { .. } => {}
+            GameEvent::StatusEffectExpired { .. } => {}
             GameEvent::ActionRejected { .. } | GameEvent::SelectedPackFailedValidation { .. } => {
                 counters.rejections += 1
             }
@@ -560,15 +670,17 @@ fn format_game_event(event: &GameEvent) -> String {
             "SelectedPackFailedValidation(folder_name={}, reason={})",
             folder_name, reason
         ),
-        GameEvent::LocationLooked { location_id } => {
+        GameEvent::LocationLooked { location_id, .. } => {
             format!("LocationLooked(location_id={})", location_id)
         }
         GameEvent::Moved {
             from_location_id,
             to_location_id,
+            ..
         } => format!("Moved(from={}, to={})", from_location_id, to_location_id),
         GameEvent::MovementBlocked {
             attempted_destination,
+            ..
         } => format!(
             "MovementBlocked(attempted_destination={})",
             attempted_destination
@@ -576,6 +688,7 @@ fn format_game_event(event: &GameEvent) -> String {
         GameEvent::LocationUnlocked {
             location_id,
             item_id,
+            ..
         } => format!(
             "LocationUnlocked(location_id={}, item_id={})",
             location_id, item_id
@@ -583,119 +696,272 @@ fn format_game_event(event: &GameEvent) -> String {
         GameEvent::LocationBarricaded {
             location_id,
             item_id,
+            ..
         } => format!(
             "LocationBarricaded(location_id={}, item_id={})",
             location_id, item_id
         ),
-        GameEvent::Inspected { target } => format!("Inspected(target={})", target),
-        GameEvent::ItemTaken { item_id } => format!("ItemTaken(item_id={})", item_id),
-        GameEvent::ItemEquipped { item_id } => format!("ItemEquipped(item_id={})", item_id),
-        GameEvent::ItemUsed { item_id, effect } => match effect {
+        GameEvent::Inspected { target, .. } => format!("Inspected(target={})", target),
+        GameEvent::ItemTaken { item_id, .. } => format!("ItemTaken(item_id={})", item_id),
+        GameEvent::ItemTransferred {
+            item_id,
+            origin,
+            destination,
+        } => format!(
+            "ItemTransferred(item_id={}, origin={}, destination={})",
+            item_id, origin, destination
+        ),
+        GameEvent::SocialEventApplied {
+            origin_id,
+            subject_id,
+            kind,
+            relationship_delta,
+            relationship_score,
+            disposition,
+        } => format!(
+            "SocialEventApplied(origin={}, subject={}, kind={:?}, delta={}, score={}, disposition={:?})",
+            origin_id, subject_id, kind, relationship_delta, relationship_score, disposition
+        ),
+        GameEvent::AbilityUsed {
+            origin_id,
+            grant_id,
+            template_id,
+            target_id,
+            effect,
+            remaining_uses,
+        } => format!(
+            "AbilityUsed(origin={}, grant={}, template={}, target={}, effect={}, remaining_uses={:?})",
+            origin_id, grant_id, template_id, target_id, effect, remaining_uses
+        ),
+        GameEvent::AbilityCooldownSet {
+            origin_id,
+            grant_id,
+            template_id,
+            ready_at_turn,
+        } => format!(
+            "AbilityCooldownSet(origin={}, grant={}, template={}, ready_at_turn={})",
+            origin_id, grant_id, template_id, ready_at_turn
+        ),
+        GameEvent::StatusEffectApplied {
+            origin_id,
+            instance_id,
+            trigger,
+            duration,
+        } => format!(
+            "StatusEffectApplied(origin={}, instance={}, trigger={:?}, duration={:?})",
+            origin_id, instance_id, trigger, duration
+        ),
+        GameEvent::ConnectionsRevealed {
+            origin_id,
+            location_id,
+            count,
+        } => format!(
+            "ConnectionsRevealed(origin={}, location={}, count={})",
+            origin_id, location_id, count
+        ),
+        GameEvent::ProgressAwarded {
+            origin_id,
+            pool,
+            amount,
+            total,
+        } => format!(
+            "ProgressAwarded(origin={}, pool={}, amount={}, total={})",
+            origin_id, pool, amount, total
+        ),
+        GameEvent::SkillLevelGained {
+            origin_id,
+            pool,
+            level,
+        } => format!(
+            "SkillLevelGained(origin={}, pool={}, level={})",
+            origin_id, pool, level
+        ),
+        GameEvent::MaxHpIncreased {
+            origin_id,
+            amount,
+            max_hp,
+        } => format!(
+            "MaxHpIncreased(origin={}, amount={}, max_hp={})",
+            origin_id, amount, max_hp
+        ),
+        GameEvent::AbilityGranted {
+            owner_id,
+            grant_id,
+            template_id,
+            source,
+        } => format!(
+            "AbilityGranted(owner={}, grant={}, template={}, source={:?})",
+            owner_id, grant_id, template_id, source
+        ),
+        GameEvent::AbilityGrantExpired {
+            owner_id,
+            grant_id,
+            template_id,
+        } => format!(
+            "AbilityGrantExpired(owner={}, grant={}, template={})",
+            owner_id, grant_id, template_id
+        ),
+        GameEvent::ItemEquipped { origin_id, item_id } => {
+            format!("ItemEquipped(origin={}, item_id={})", origin_id, item_id)
+        }
+        GameEvent::ItemUsed {
+            origin_id,
+            item_id,
+            effect,
+        } => match effect {
             ItemUseEffect::Healing { amount } => {
-                format!("ItemUsed(item_id={}, effect=Healing({}))", item_id, amount)
+                format!(
+                    "ItemUsed(origin={}, item_id={}, effect=Healing({}))",
+                    origin_id, item_id, amount
+                )
             }
             ItemUseEffect::RevealedLocations { count } => {
                 format!(
-                    "ItemUsed(item_id={}, effect=RevealedLocations({}))",
-                    item_id, count
+                    "ItemUsed(origin={}, item_id={}, effect=RevealedLocations({}))",
+                    origin_id, item_id, count
                 )
             }
             ItemUseEffect::NoEffect => {
-                format!("ItemUsed(item_id={}, effect=NoEffect)", item_id)
+                format!(
+                    "ItemUsed(origin={}, item_id={}, effect=NoEffect)",
+                    origin_id, item_id
+                )
             }
         },
+        GameEvent::ItemConsumed {
+            origin_id,
+            item_id,
+            template_id,
+            reason,
+        } => format!(
+            "ItemConsumed(origin={}, item_id={}, template_id={}, reason={})",
+            origin_id, item_id, template_id, reason
+        ),
         GameEvent::AttackResolved {
             target_id,
             target_kind,
             damage,
             defeated,
+            ..
         } => format!(
             "AttackResolved(target_id={}, kind={:?}, damage={}, defeated={})",
             target_id, target_kind, damage, defeated
         ),
         GameEvent::DamageTaken {
+            origin_id,
+            target_id,
             amount,
             remaining_hp,
         } => format!(
-            "DamageTaken(amount={}, remaining_hp={})",
-            amount, remaining_hp
+            "DamageTaken(origin={}, target={}, amount={}, remaining_hp={})",
+            origin_id, target_id, amount, remaining_hp
         ),
-        GameEvent::NoiseSpawnedEnemy {
-            enemy_id,
+        GameEvent::HealthRestored {
+            origin_id,
+            target_id,
+            amount,
+            remaining_hp,
+        } => format!(
+            "HealthRestored(origin={}, target={}, amount={}, remaining_hp={})",
+            origin_id, target_id, amount, remaining_hp
+        ),
+        GameEvent::ActorSpawnedFromNoise {
+            origin_id,
             template_id,
             location_id,
         } => format!(
-            "NoiseSpawnedEnemy(enemy_id={}, template_id={}, location_id={})",
-            enemy_id, template_id, location_id
+            "ActorSpawnedFromNoise(origin_id={}, template_id={}, location_id={})",
+            origin_id, template_id, location_id
         ),
         GameEvent::NoiseAttractorShifted {
             location_id,
-            enemy_ids,
+            actor_ids,
         } => format!(
-            "NoiseAttractorShifted(location_id={}, enemy_ids={})",
+            "NoiseAttractorShifted(location_id={}, actor_ids={})",
             location_id,
-            enemy_ids.join("|")
+            actor_ids.join("|")
         ),
         GameEvent::SightAttractorAcquired {
-            enemy_id,
+            origin_id,
             subject_id,
             location_id,
         } => format!(
-            "SightAttractorAcquired(enemy_id={}, subject_id={}, location_id={})",
-            enemy_id, subject_id, location_id
+            "SightAttractorAcquired(origin_id={}, subject_id={}, location_id={})",
+            origin_id, subject_id, location_id
         ),
         GameEvent::SightAttractorMissed {
-            enemy_id,
+            origin_id,
             subject_id,
             location_id,
             detect_chance_percent,
             roll_percent,
         } => format!(
-            "SightAttractorMissed(enemy_id={}, subject_id={}, location_id={}, detect_chance_percent={}, roll_percent={})",
-            enemy_id, subject_id, location_id, detect_chance_percent, roll_percent
+            "SightAttractorMissed(origin_id={}, subject_id={}, location_id={}, detect_chance_percent={}, roll_percent={})",
+            origin_id, subject_id, location_id, detect_chance_percent, roll_percent
         ),
         GameEvent::SightAttractorLost {
-            enemy_id,
+            origin_id,
             subject_id,
         } => format!(
-            "SightAttractorLost(enemy_id={}, subject_id={})",
-            enemy_id, subject_id
+            "SightAttractorLost(origin_id={}, subject_id={})",
+            origin_id, subject_id
         ),
-        GameEvent::SpawnedEnemyMoved {
-            enemy_id,
+        GameEvent::ActorMoved {
+            origin_id,
             from_location_id,
             to_location_id,
             target_location_id,
         } => format!(
-            "SpawnedEnemyMoved(enemy_id={}, from={}, to={}, target={})",
-            enemy_id, from_location_id, to_location_id, target_location_id
+            "ActorMoved(origin_id={}, from={}, to={}, target={})",
+            origin_id, from_location_id, to_location_id, target_location_id
         ),
-        GameEvent::SpawnedEnemyWaited {
-            enemy_id,
+        GameEvent::ActorWaited {
+            origin_id,
             location_id,
             reason,
         } => format!(
-            "SpawnedEnemyWaited(enemy_id={}, location_id={}, reason={})",
-            enemy_id, location_id, reason
+            "ActorWaited(origin_id={}, location_id={}, reason={})",
+            origin_id, location_id, reason
         ),
-        GameEvent::SpawnedEnemyAttackedHazard {
-            enemy_id,
+        GameEvent::ActorAttackedHazard {
+            origin_id,
             hazard_kind,
             location_id,
             break_chance_percent,
             roll_percent,
             broken,
         } => format!(
-            "SpawnedEnemyAttackedHazard(enemy_id={}, hazard_kind={:?}, location_id={}, break_chance_percent={}, roll_percent={}, broken={})",
-            enemy_id, hazard_kind, location_id, break_chance_percent, roll_percent, broken
+            "ActorAttackedHazard(origin_id={}, hazard_kind={:?}, location_id={}, break_chance_percent={}, roll_percent={}, broken={})",
+            origin_id, hazard_kind, location_id, break_chance_percent, roll_percent, broken
         ),
-        GameEvent::AttackWhiff => "AttackWhiff".to_owned(),
-        GameEvent::Waited { location_id } => format!("Waited(location_id={})", location_id),
+        GameEvent::AttackWhiff { .. } => "AttackWhiff".to_owned(),
+        GameEvent::Waited { location_id, .. } => format!("Waited(location_id={})", location_id),
         GameEvent::ObjectiveCompleted { objective_id } => {
             format!("ObjectiveCompleted(objective_id={})", objective_id)
         }
         GameEvent::RunWon => "RunWon".to_owned(),
-        GameEvent::RunLost => "RunLost".to_owned(),
+        GameEvent::RunLost { actor_id } => format!("RunLost(actor_id={})", actor_id),
+        GameEvent::NarratorItemAdmitted { item_id } => {
+            format!("NarratorItemAdmitted(item_id={})", item_id)
+        }
+        GameEvent::NarratorStatusAdmitted { instance_id } => {
+            format!("NarratorStatusAdmitted(instance_id={})", instance_id)
+        }
+        GameEvent::NarratorNpcAdmitted { instance_id } => {
+            format!("NarratorNpcAdmitted(instance_id={})", instance_id)
+        }
+        GameEvent::NarratorEnemyAdmitted { instance_id } => {
+            format!("NarratorEnemyAdmitted(instance_id={})", instance_id)
+        }
+        GameEvent::NarratorBossAdmitted { instance_id } => {
+            format!("NarratorBossAdmitted(instance_id={})", instance_id)
+        }
+        GameEvent::NarratorTemporaryExitAdmitted { instance_id } => {
+            format!("NarratorTemporaryExitAdmitted(instance_id={})", instance_id)
+        }
+        GameEvent::StatusEffectExpired { instance_id } => {
+            format!("StatusEffectExpired(instance_id={})", instance_id)
+        }
     }
 }
 
@@ -705,7 +971,9 @@ mod tests {
         datapack_schema_version, discover_datapacks, load_datapack_bundle_by_folder,
     };
     use crate::game::actions::GameEvent;
-    use crate::game::generate_new_run;
+    use crate::game::{
+        ActorDisposition, ActorState, InstanceLifecycle, NpcInstance, generate_new_run,
+    };
 
     use super::{DiagnosticArea, DiagnosticSeverity, build_diagnostic_report};
 
@@ -717,10 +985,12 @@ mod tests {
         let run = generate_new_run(&bundle).state;
         let events = vec![
             GameEvent::Moved {
+                origin_id: "player".to_owned(),
                 from_location_id: "front_verandah".to_owned(),
                 to_location_id: "kitchen".to_owned(),
             },
             GameEvent::ItemTaken {
+                origin_id: "player".to_owned(),
                 item_id: "medkit".to_owned(),
             },
         ];
@@ -837,9 +1107,9 @@ mod tests {
         let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
         run.enemies_alive.insert(enemy_id.clone());
         run.enemy_hp.insert(enemy_id.clone(), 3);
-        run.spawned_enemy_sight_targets
+        run.actor_sight_targets
             .insert(enemy_id.clone(), "front_verandah".to_owned());
-        run.spawned_enemy_sight_subjects
+        run.actor_sight_subjects
             .insert(enemy_id.clone(), "player".to_owned());
 
         let report = build_diagnostic_report(
@@ -858,7 +1128,57 @@ mod tests {
             health
                 .attractor_summary_rows
                 .iter()
-                .any(|row| row.contains("tracking by sight toward player"))
+                .any(|row| row.contains("tracking by sight toward Player"))
+        }));
+    }
+
+    #[test]
+    fn diagnostic_report_surfaces_a_tracking_npc_without_enemy_specific_logic() {
+        let datapacks = discover_datapacks();
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        let mut actor = ActorState::configured(None, None, true, false, true, false);
+        actor.add_declared_capabilities(&["noise_track".to_owned()]);
+        run.location_npcs.insert(
+            "kitchen".to_owned(),
+            vec![NpcInstance {
+                instance_id: "tracker_fixture".to_owned(),
+                template_id: "tracker_fixture".to_owned(),
+                location_id: "kitchen".to_owned(),
+                lifecycle: InstanceLifecycle::Active,
+                provenance: "test".to_owned(),
+                name: "Tracker".to_owned(),
+                description: "A generic perception fixture.".to_owned(),
+                faction: "test".to_owned(),
+                tags: Vec::new(),
+                disposition: ActorDisposition::Neutral,
+                actor,
+                quest_objective_ids: Vec::new(),
+                inventory: Vec::new(),
+                equipped_item_id: None,
+            }],
+        );
+        run.actor_noise_targets
+            .insert("tracker_fixture".to_owned(), "front_verandah".to_owned());
+
+        let report = build_diagnostic_report(
+            &datapacks,
+            Some(&bundle),
+            Some(&run),
+            false,
+            "save.json",
+            1,
+            Some(1),
+            crate::data::datapacks::datapack_schema_version(),
+            &[],
+        );
+
+        assert!(report.run_health.as_ref().is_some_and(|health| {
+            health
+                .attractor_summary_rows
+                .iter()
+                .any(|row| row.contains("Tracker (tracker_fixture) tracking noise"))
         }));
     }
 }

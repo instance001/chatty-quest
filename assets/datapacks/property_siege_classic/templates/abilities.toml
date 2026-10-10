@@ -1,0 +1,69 @@
+[[abilities]]
+id = "grave_bolt"
+name = "Grave Bolt"
+description = "A basic necromantic strike that turns nearby death into a sharp, cold answer."
+tags = ["magic", "necromancy", "starter"]
+required_tags = ["can_necromancy"]
+progress_pool = "necromancy"
+required_xp = 0
+xp_on_success = 1
+
+[abilities.effect]
+kind = "damage"
+amount = 2
+
+[[abilities]]
+id = "spectral_spark"
+name = "Spectral Spark"
+description = "A one-use necromantic flicker trapped in a marked scrap of paper."
+tags = ["magic", "necromancy", "temporary"]
+required_tags = ["can_necromancy"]
+progress_pool = "necromancy"
+required_xp = 0
+xp_on_success = 1
+learnable = false
+
+[abilities.effect]
+kind = "damage"
+amount = 1
+
+[[abilities]]
+id = "bone_lance"
+name = "Bone Lance"
+description = "A stronger necromantic projectile unlocked through repeated practice."
+tags = ["magic", "necromancy"]
+required_tags = ["can_necromancy"]
+progress_pool = "necromancy"
+required_xp = 10
+xp_on_success = 1
+cooldown_turns = 2
+
+[abilities.effect]
+kind = "damage"
+amount = 5
+
+[[abilities]]
+id = "raise_dead"
+name = "Raise Dead"
+description = "A deliberate necromantic reversal for an incapacitated ally. It is not ordinary healing."
+tags = ["magic", "necromancy", "revival"]
+required_tags = ["can_necromancy"]
+progress_pool = "necromancy"
+required_xp = 20
+xp_on_success = 1
+
+[abilities.effect]
+kind = "revive"
+amount = 3
+required_target_tags = ["dead"]
+
+[[abilities]]
+id = "necromantic_literacy"
+name = "Necromantic Literacy"
+description = "The practiced knack of reading a necromantic working from a physical source and making it your own."
+tags = ["skill", "necromancy", "scroll_literacy"]
+required_tags = ["can_necromancy"]
+progress_pool = "necromancy"
+required_xp = 10
+xp_on_success = 0
+scroll_learning_tags = ["necromancy"]

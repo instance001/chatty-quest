@@ -91,12 +91,60 @@ pub fn describe_location(
         lines.push(format!("Connections: {}.", exits.join(", ")));
     }
 
+    let temporary_routes = state
+        .temporary_exits
+        .iter()
+        .filter(|exit| {
+            exit.lifecycle == super::state::InstanceLifecycle::Active
+                && exit.from_location_id == location.id
+        })
+        .filter_map(|exit| {
+            find_location(bundle, &exit.to_location_id).map(|destination| {
+                if exit.locked {
+                    format!("{} [temporary, locked]", destination.name)
+                } else {
+                    format!("{} [temporary]", destination.name)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    if !temporary_routes.is_empty() {
+        lines.push(format!(
+            "Temporary routes: {}.",
+            temporary_routes.join(", ")
+        ));
+    }
+
+    let additional_objectives = state
+        .additional_objectives
+        .iter()
+        .filter(|objective| {
+            !objective.completed && objective.lifecycle == super::state::InstanceLifecycle::Active
+        })
+        .map(|objective| objective.name.clone())
+        .collect::<Vec<_>>();
+    if !additional_objectives.is_empty() {
+        lines.push(format!(
+            "Additional objectives: {}.",
+            additional_objectives.join(", ")
+        ));
+    }
+
     if let Some(items) = state.location_items.get(&location.id)
         && !items.is_empty()
     {
         let item_names = items
             .iter()
-            .filter_map(|id| find_item(bundle, id).map(|item| item.name.clone()))
+            .filter_map(|id| {
+                find_item(bundle, id)
+                    .map(|item| item.name.clone())
+                    .or_else(|| {
+                        state
+                            .world_item_instances
+                            .get(id)
+                            .map(|item| item.name.clone())
+                    })
+            })
             .collect::<Vec<_>>();
         if !item_names.is_empty() {
             lines.push(format!("Items here: {}.", item_names.join(", ")));
@@ -109,7 +157,16 @@ pub fn describe_location(
         let enemy_names = enemies
             .iter()
             .filter(|id| state.enemies_alive.contains(*id))
-            .filter_map(|id| find_enemy(bundle, id).map(|enemy| enemy.name.clone()))
+            .filter_map(|id| {
+                find_enemy(bundle, id)
+                    .map(|enemy| enemy.name.clone())
+                    .or_else(|| {
+                        state
+                            .enemy_instances
+                            .get(id)
+                            .map(|instance| instance.name.clone())
+                    })
+            })
             .collect::<Vec<_>>();
         if !enemy_names.is_empty() {
             lines.push(format!("Enemies here: {}.", enemy_names.join(", ")));
@@ -122,10 +179,39 @@ pub fn describe_location(
         let boss_names = bosses
             .iter()
             .filter(|id| state.bosses_alive.contains(*id))
-            .filter_map(|id| find_boss(bundle, id).map(|boss| boss.name.clone()))
+            .filter_map(|id| {
+                find_boss(bundle, id)
+                    .map(|boss| boss.name.clone())
+                    .or_else(|| {
+                        state
+                            .boss_instances
+                            .get(id)
+                            .map(|instance| instance.name.clone())
+                    })
+            })
             .collect::<Vec<_>>();
         if !boss_names.is_empty() {
             lines.push(format!("Boss here: {}.", boss_names.join(", ")));
+        }
+    }
+
+    if let Some(npcs) = state.location_npcs.get(&location.id) {
+        let names = npcs
+            .iter()
+            .filter(|npc| matches!(npc.lifecycle, super::state::InstanceLifecycle::Active))
+            .map(|npc| {
+                let quest_marker = (!npc.quest_objective_ids.is_empty()).then_some(" quest");
+                format!(
+                    "{} [{}; {:?}{}]",
+                    npc.name,
+                    npc.faction,
+                    npc.disposition,
+                    quest_marker.unwrap_or("")
+                )
+            })
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            lines.push(format!("People here: {}.", names.join(", ")));
         }
     }
 
@@ -192,7 +278,8 @@ pub fn enemy_template_id(enemy_id: &str) -> &str {
 }
 
 pub fn find_boss<'a>(bundle: &'a DatapackBundle, id: &str) -> Option<&'a BossTemplate> {
-    bundle.bosses.iter().find(|boss| boss.id == id)
+    let template_id = enemy_template_id(id);
+    bundle.bosses.iter().find(|boss| boss.id == template_id)
 }
 
 pub fn find_boss_by_name_or_id<'a>(
@@ -203,20 +290,6 @@ pub fn find_boss_by_name_or_id<'a>(
         .bosses
         .iter()
         .find(|boss| matches_name(query, &boss.id, &boss.name))
-}
-
-pub fn equipped_damage(state: &RunState) -> i32 {
-    state
-        .equipped_item_id
-        .as_deref()
-        .and_then(|item_id| {
-            state
-                .inventory
-                .iter()
-                .find(|item| item.id == item_id)
-                .map(|item| item.damage)
-        })
-        .unwrap_or(1)
 }
 
 pub fn is_location_locked(state: &RunState, location_id: &str) -> bool {

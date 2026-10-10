@@ -23,19 +23,26 @@ pub(super) fn handle_move(
     let Some(destination_location) = find_location_by_name_or_id(bundle, destination) else {
         return ActionOutcome {
             events: vec![GameEvent::MovementBlocked {
+                origin_id: state.player_entity_id.clone(),
                 attempted_destination: destination.to_owned(),
             }],
             lines: vec!["That destination is not part of this scenario.".to_owned()],
         };
     };
 
-    if !current_location
+    let authored_connection = current_location
         .connections
         .iter()
-        .any(|connection| connection == &destination_location.id)
-    {
+        .any(|connection| connection == &destination_location.id);
+    let temporary_exit = state.temporary_exits.iter().find(|exit| {
+        exit.lifecycle == super::state::InstanceLifecycle::Active
+            && exit.from_location_id == current_location.id
+            && exit.to_location_id == destination_location.id
+    });
+    if !authored_connection && temporary_exit.is_none() {
         return ActionOutcome {
             events: vec![GameEvent::MovementBlocked {
+                origin_id: state.player_entity_id.clone(),
                 attempted_destination: destination_location.id.clone(),
             }],
             lines: vec![
@@ -44,6 +51,16 @@ pub(super) fn handle_move(
                     .clone()
                     .unwrap_or_else(|| "You cannot get there from here.".to_owned()),
             ],
+        };
+    }
+
+    if temporary_exit.is_some_and(|exit| exit.locked) {
+        return ActionOutcome {
+            events: vec![GameEvent::MovementBlocked {
+                origin_id: state.player_entity_id.clone(),
+                attempted_destination: destination_location.id.clone(),
+            }],
+            lines: vec!["That temporary route is locked.".to_owned()],
         };
     }
 
@@ -59,6 +76,7 @@ pub(super) fn handle_move(
             });
         return ActionOutcome {
             events: vec![GameEvent::MovementBlocked {
+                origin_id: state.player_entity_id.clone(),
                 attempted_destination: destination_location.id.clone(),
             }],
             lines: vec![locked_line],
@@ -73,6 +91,10 @@ pub(super) fn handle_move(
     state
         .visited_locations
         .insert(destination_location.id.clone());
+    if let Some(instance) = state.location_instances.get_mut(&destination_location.id) {
+        instance.known = true;
+        instance.visited = true;
+    }
 
     let mut lines = vec![
         format!("You move to {}.", destination_location.name),
@@ -82,6 +104,7 @@ pub(super) fn handle_move(
 
     ActionOutcome {
         events: vec![GameEvent::Moved {
+            origin_id: state.player_entity_id.clone(),
             from_location_id,
             to_location_id: destination_location.id.clone(),
         }],
@@ -94,6 +117,9 @@ pub(super) fn handle_unlock(
     bundle: &DatapackBundle,
     target: &str,
 ) -> ActionOutcome {
+    if !state.controlled_actor_can_carry_inventory() {
+        return inventory_capability_rejected();
+    }
     let Some(location) = find_location_by_name_or_id(bundle, target) else {
         return ActionOutcome {
             events: vec![GameEvent::ActionRejected {
@@ -121,7 +147,10 @@ pub(super) fn handle_unlock(
         };
     }
 
-    if !state.inventory.iter().any(|item| item.id == unlock_item_id) {
+    if !state
+        .controlled_inventory()
+        .is_some_and(|inventory| inventory.iter().any(|item| item.id == unlock_item_id))
+    {
         return ActionOutcome {
             events: vec![GameEvent::ActionRejected {
                 reason: format!("You need {} to unlock {}.", unlock_item_id, location.name),
@@ -148,6 +177,9 @@ pub(super) fn handle_barricade(
     bundle: &DatapackBundle,
     target: &str,
 ) -> ActionOutcome {
+    if !state.controlled_actor_can_carry_inventory() {
+        return inventory_capability_rejected();
+    }
     let Some(location) = find_location_by_name_or_id(bundle, target) else {
         return ActionOutcome {
             events: vec![GameEvent::ActionRejected {
@@ -198,9 +230,8 @@ pub(super) fn handle_barricade(
     };
 
     if !state
-        .inventory
-        .iter()
-        .any(|item| item.id == barricade_item_id)
+        .controlled_inventory()
+        .is_some_and(|inventory| inventory.iter().any(|item| item.id == barricade_item_id))
     {
         return ActionOutcome {
             events: vec![GameEvent::ActionRejected {
@@ -210,12 +241,23 @@ pub(super) fn handle_barricade(
         };
     }
 
+    let origin_id = state.player_entity_id.clone();
+    let restoration = if location.barricade_heal > 0 {
+        match state.restore_runtime_actor_health(&origin_id, location.barricade_heal) {
+            Ok(restoration) => Some(restoration),
+            Err(reason) => {
+                return ActionOutcome {
+                    events: vec![GameEvent::ActionRejected {
+                        reason: reason.clone(),
+                    }],
+                    lines: vec![reason],
+                };
+            }
+        }
+    } else {
+        None
+    };
     state.barricaded_locations.insert(location.id.clone());
-
-    let previous_hp = state.hp;
-    if location.barricade_heal > 0 {
-        state.hp = (state.hp + location.barricade_heal).min(state.max_hp);
-    }
 
     let mut lines = vec![
         location
@@ -223,18 +265,41 @@ pub(super) fn handle_barricade(
             .clone()
             .unwrap_or_else(|| format!("You barricade {}.", location.name)),
     ];
-    if state.hp > previous_hp {
+    if let Some((_, restored, remaining_hp)) = restoration
+        && restored > 0
+    {
         lines.push(format!(
             "You finally get a second to breathe. HP rises from {} to {}.",
-            previous_hp, state.hp
+            remaining_hp - restored,
+            remaining_hp
         ));
     }
 
+    let mut events = vec![GameEvent::LocationBarricaded {
+        origin_id: state.player_entity_id.clone(),
+        location_id: location.id.clone(),
+        item_id: barricade_item_id.to_owned(),
+    }];
+    if let Some((_, restored, remaining_hp)) = restoration
+        && restored > 0
+    {
+        events.push(GameEvent::HealthRestored {
+            origin_id: "host barricade system".to_owned(),
+            target_id: origin_id,
+            amount: restored,
+            remaining_hp,
+        });
+    }
+
+    ActionOutcome { events, lines }
+}
+
+fn inventory_capability_rejected() -> ActionOutcome {
+    let reason = "The controlled actor lacks the inventory capability contract.".to_owned();
     ActionOutcome {
-        events: vec![GameEvent::LocationBarricaded {
-            location_id: location.id.clone(),
-            item_id: barricade_item_id.to_owned(),
+        events: vec![GameEvent::ActionRejected {
+            reason: reason.clone(),
         }],
-        lines,
+        lines: vec![reason],
     }
 }

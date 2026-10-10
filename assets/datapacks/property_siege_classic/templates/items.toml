@@ -63,6 +63,21 @@ audio = "media/audio/items/keys_jingle.ogg"
 display_role = "item"
 
 [[items]]
+id = "grave_scroll"
+name = "Salt-Stained Scroll"
+description = "A brittle strip of paper inked with one small necromantic answer. The spell will not survive being used."
+narrator_brief = "Treat the scroll as a practical, slightly alarming scrap of borrowed occult confidence."
+tags = ["consumable", "ability_grant", "necromancy"]
+damage = 0
+
+[[items.ability_grants]]
+template_id = "spectral_spark"
+remaining_uses = 1
+
+[items.media]
+display_role = "item"
+
+[[items]]
 id = "barricade_kit"
 name = "Barricade Kit"
 description = "A rough bundle of planks, nails, and just enough bad judgment to improve your odds."

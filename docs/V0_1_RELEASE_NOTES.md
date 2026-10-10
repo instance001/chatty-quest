@@ -38,9 +38,9 @@ This pack is the `v0.1` proof slice for:
 Automated validation:
 
 - original `v0.1` release validation passed on `2026-06-11`
-- the current post-`v0.1` branch now passes `105` automated tests
+- the current post-`v0.1` branch now passes `313` automated tests
 - the current post-`v0.1` branch now passes `cargo clippy --all-targets --all-features -- -D warnings`
-- current coverage includes datapack loading, run generation, command boundary parsing, locked progression, broken-open gate state, barricade behavior, finale-security rule validation, noise escalation and decay, noise attractor retargeting, max-noise enemy spawning, spawned-enemy movement blockers and hazard attacks, threat forecasting, finale-phase combat behavior, secured-property finale payoff behavior, epilogue phase surfacing, post-win epilogue hooks, epilogue hook UI surfacing, objective-condition name surfacing, sidebar objective-progress surfacing, utility/security truth surfacing, bounded rolling-summary support memory, dry handoff snapshot packaging, narrator boundaries, narrator context packaging, media focus, diagnostics, and save/load roundtrip
+- current coverage includes datapack loading, run generation, command boundary parsing, locked progression, broken-open gate state, barricade behavior, finale-security rule validation, noise escalation and decay, generic actor combat and targeting, controller-neutral action timing, item transfer and social consequences, ability grants/progression/source learning, proposal admission, media-pool resolution, diagnostics, and save/load roundtrip
 
 Manual validation:
 

@@ -3,9 +3,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::data::datapacks::DatapackBundle;
 
 use super::actions::{ActionOutcome, GameEvent, MovementHazardKind};
+use super::capabilities::{self, EngineCapability};
+use super::effects::{adjusted_timing_cost, consume_timing_effects, evaluate_timing_effects};
+use super::movement::handle_move;
 use super::queries::{find_boss, find_enemy, find_location};
-use super::state::RunState;
-pub(super) fn apply_spawned_enemy_turns(
+use super::reducer::{apply_actor_status_effects, expire_scene_duration_effects_after_movement};
+use super::state::{ActionTimingKind, EffectTrigger, InstanceLifecycle, RunState};
+pub(super) fn apply_autonomous_actor_turns(
     state: &mut RunState,
     bundle: &DatapackBundle,
     outcome: &mut ActionOutcome,
@@ -14,22 +18,21 @@ pub(super) fn apply_spawned_enemy_turns(
         .events
         .iter()
         .filter_map(|event| {
-            if let GameEvent::NoiseSpawnedEnemy { enemy_id, .. } = event {
-                Some(enemy_id.clone())
+            if let GameEvent::ActorSpawnedFromNoise { origin_id, .. } = event {
+                Some(origin_id.clone())
             } else {
                 None
             }
         })
         .collect::<HashSet<_>>();
-    let mut spawned_ids = state
-        .enemies_alive
-        .iter()
-        .filter(|enemy_id| is_noise_spawned_enemy(enemy_id))
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut spawned_ids = autonomous_actor_ids(state);
+    spawned_ids.retain(|actor_id| spawned_actor_can_move(state, bundle, actor_id));
     spawned_ids.sort();
 
     for enemy_id in spawned_ids {
+        if !state.actor_is_ready(&enemy_id) {
+            continue;
+        }
         if spawned_this_turn.contains(&enemy_id) {
             continue;
         }
@@ -48,9 +51,9 @@ pub(super) fn apply_spawned_enemy_turns(
         if current_location_id == target_location_id
             && !matches!(attractor.kind, SpawnedEnemyAttractorKind::Sight)
         {
-            state.spawned_enemy_searching.insert(enemy_id.clone());
+            state.actor_searching.insert(enemy_id.clone());
         }
-        let is_searching = state.spawned_enemy_searching.contains(&enemy_id);
+        let is_searching = state.actor_searching.contains(&enemy_id);
 
         let mut step = spawned_enemy_next_step(
             state,
@@ -71,17 +74,17 @@ pub(super) fn apply_spawned_enemy_turns(
                 &target_location_id,
             )
         {
-            state.spawned_enemy_sight_delays.insert(enemy_id.clone(), 1);
+            state.actor_sight_delays.insert(enemy_id.clone(), 1);
             step = SpawnedEnemyStep::Wait(format!(
                 "chasing {} by sight takes an extra moment",
                 state
-                    .spawned_enemy_sight_subjects
+                    .actor_sight_subjects
                     .get(&enemy_id)
                     .map(String::as_str)
                     .unwrap_or("the attractor")
             ));
         } else if sighted_this_turn {
-            state.spawned_enemy_sight_delays.remove(&enemy_id);
+            state.actor_sight_delays.remove(&enemy_id);
         }
 
         match step {
@@ -89,36 +92,127 @@ pub(super) fn apply_spawned_enemy_turns(
                 to_location_id,
                 step_target_location_id,
             } => {
-                move_spawned_enemy(state, &enemy_id, &current_location_id, &to_location_id);
-                let event_target_location_id =
-                    step_target_location_id.unwrap_or_else(|| target_location_id.clone());
-                outcome.events.push(GameEvent::SpawnedEnemyMoved {
-                    enemy_id: enemy_id.clone(),
-                    from_location_id: current_location_id.clone(),
-                    to_location_id: to_location_id.clone(),
-                    target_location_id: event_target_location_id,
-                });
-                outcome.lines.push(format!(
-                    "{} shifts from {} toward {}.",
-                    enemy_display_name(bundle, &enemy_id),
-                    location_display_name(bundle, &current_location_id),
-                    location_display_name(bundle, &to_location_id)
-                ));
+                let context_tags = find_location(bundle, &current_location_id)
+                    .map(|location| location.tags.as_slice())
+                    .unwrap_or_default();
+                let timing = evaluate_timing_effects(
+                    state,
+                    &enemy_id,
+                    &[ActionTimingKind::Movement],
+                    context_tags,
+                );
+                if timing.blocked_by_instance_id.is_some() {
+                    continue;
+                }
+                let mut movement = handle_actor_move(
+                    state,
+                    bundle,
+                    &enemy_id,
+                    &to_location_id,
+                    step_target_location_id
+                        .as_deref()
+                        .or(Some(&target_location_id)),
+                );
+                if movement.events.iter().any(|event| {
+                    matches!(event, GameEvent::ActorMoved { origin_id, .. } if origin_id == &enemy_id)
+                }) {
+                    apply_actor_status_effects(
+                        state,
+                        bundle,
+                        &enemy_id,
+                        EffectTrigger::Movement,
+                        &[],
+                        &mut movement,
+                    );
+                    expire_scene_duration_effects_after_movement(
+                        state,
+                        &enemy_id,
+                        &current_location_id,
+                        &mut movement,
+                    );
+                    let cost = adjusted_timing_cost(
+                        state.actor_traversal_cost(&enemy_id),
+                        timing.cost_delta,
+                    );
+                    state.commit_actor_action_time(&enemy_id, cost);
+                    outcome.events.extend(
+                        consume_timing_effects(state, &timing.consume_on_success)
+                            .into_iter()
+                            .map(|instance_id| GameEvent::StatusEffectExpired { instance_id }),
+                    );
+                }
+                outcome.events.extend(movement.events);
+                outcome.lines.extend(movement.lines);
             }
             SpawnedEnemyStep::Wait(reason) => {
-                outcome.events.push(GameEvent::SpawnedEnemyWaited {
-                    enemy_id: enemy_id.clone(),
+                let context_tags = find_location(bundle, &current_location_id)
+                    .map(|location| location.tags.as_slice())
+                    .unwrap_or_default();
+                let timing = evaluate_timing_effects(
+                    state,
+                    &enemy_id,
+                    &[ActionTimingKind::Wait],
+                    context_tags,
+                );
+                if timing.blocked_by_instance_id.is_some() {
+                    continue;
+                }
+                state.commit_actor_action_time(
+                    &enemy_id,
+                    adjusted_timing_cost(1, timing.cost_delta),
+                );
+                outcome.events.push(GameEvent::ActorWaited {
+                    origin_id: enemy_id.clone(),
                     location_id: current_location_id.clone(),
                     reason: reason.clone(),
                 });
                 outcome.lines.push(format!(
                     "{} waits at {}: {}.",
-                    enemy_display_name(bundle, &enemy_id),
+                    actor_display_name(state, bundle, &enemy_id),
                     location_display_name(bundle, &current_location_id),
                     reason
                 ));
+                apply_actor_status_effects(
+                    state,
+                    bundle,
+                    &enemy_id,
+                    EffectTrigger::Wait,
+                    &[],
+                    outcome,
+                );
+                outcome.events.extend(
+                    consume_timing_effects(state, &timing.consume_on_success)
+                        .into_iter()
+                        .map(|instance_id| GameEvent::StatusEffectExpired { instance_id }),
+                );
             }
             SpawnedEnemyStep::AttackHazard(hazard) => {
+                if !spawned_actor_has_combat_contract(state, bundle, &enemy_id) {
+                    // A tracking/movement contract may lead an actor to a barricade, but it
+                    // does not grant an implicit combat branch.  Leave the hazard untouched
+                    // rather than emitting a decorative attack event.
+                    outcome.lines.push(format!(
+                        "{} cannot attack the {}: its combat capability is unavailable.",
+                        actor_display_name(state, bundle, &enemy_id),
+                        match hazard.kind {
+                            MovementHazardKind::Barricade => "barricade",
+                            MovementHazardKind::LockedGate => "locked gate",
+                        }
+                    ));
+                    continue;
+                }
+                let context_tags = find_location(bundle, &current_location_id)
+                    .map(|location| location.tags.as_slice())
+                    .unwrap_or_default();
+                let timing = evaluate_timing_effects(
+                    state,
+                    &enemy_id,
+                    &[ActionTimingKind::Combat],
+                    context_tags,
+                );
+                if timing.blocked_by_instance_id.is_some() {
+                    continue;
+                }
                 let break_chance_percent = spawned_hazard_break_chance_percent(bundle);
                 let roll_percent =
                     deterministic_hazard_break_roll(state, &enemy_id, &hazard.location_id);
@@ -126,8 +220,12 @@ pub(super) fn apply_spawned_enemy_turns(
                 if broken {
                     break_movement_hazard(state, &hazard);
                 }
-                outcome.events.push(GameEvent::SpawnedEnemyAttackedHazard {
-                    enemy_id: enemy_id.clone(),
+                state.commit_actor_action_time(
+                    &enemy_id,
+                    adjusted_timing_cost(state.actor_attack_cost(&enemy_id), timing.cost_delta),
+                );
+                outcome.events.push(GameEvent::ActorAttackedHazard {
+                    origin_id: enemy_id.clone(),
                     hazard_kind: hazard.kind.clone(),
                     location_id: hazard.location_id.clone(),
                     break_chance_percent,
@@ -135,11 +233,147 @@ pub(super) fn apply_spawned_enemy_turns(
                     broken,
                 });
                 outcome.lines.push(spawned_enemy_hazard_attack_line(
-                    bundle, &enemy_id, &hazard, broken,
+                    state, bundle, &enemy_id, &hazard, broken,
                 ));
+                // A hazard strike is still a reducer-confirmed combat action.  It does not get
+                // a noun-specific effect lane merely because its impact is a gate or barricade:
+                // actor-owned combat statuses must trigger and expire exactly as they do for a
+                // hostile actor attack.
+                apply_actor_status_effects(
+                    state,
+                    bundle,
+                    &enemy_id,
+                    EffectTrigger::Combat,
+                    &[],
+                    outcome,
+                );
+                outcome.events.extend(
+                    consume_timing_effects(state, &timing.consume_on_success)
+                        .into_iter()
+                        .map(|instance_id| GameEvent::StatusEffectExpired { instance_id }),
+                );
             }
         }
     }
+}
+
+/// Shared reducer implementation for an actor movement request. The existing noise/sight loop and
+/// direct player instructions both enter here, so NPCs and actor-capable world items never need a
+/// noun-specific movement implementation.
+pub(crate) fn handle_actor_move(
+    state: &mut RunState,
+    bundle: &DatapackBundle,
+    actor_id: &str,
+    destination: &str,
+    target_location_id: Option<&str>,
+) -> ActionOutcome {
+    if actor_id == state.player_entity_id && actor_id == "player" {
+        // Player movement remains on the compatibility reducer for fog, objective, and save
+        // semantics, but arrives through the same actor dispatcher as every other origin.
+        return handle_move(state, bundle, destination);
+    }
+    let Some(from_location_id) = spawned_enemy_location(state, actor_id) else {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "Actor is not active in the world.".to_owned(),
+            }],
+            lines: vec!["That actor cannot move from its current state.".to_owned()],
+        };
+    };
+    if !spawned_actor_can_move(state, bundle, actor_id) {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "Actor lacks the movement capability contract.".to_owned(),
+            }],
+            lines: vec![format!(
+                "{} cannot move.",
+                actor_display_name(state, bundle, actor_id)
+            )],
+        };
+    }
+    if !legal_spawned_enemy_exits(state, bundle, &from_location_id)
+        .iter()
+        .any(|exit_id| exit_id == destination)
+    {
+        return ActionOutcome {
+            events: vec![GameEvent::ActionRejected {
+                reason: "Destination is not a legal adjacent route for that actor.".to_owned(),
+            }],
+            lines: vec![format!(
+                "{} cannot reach that destination from here.",
+                actor_display_name(state, bundle, actor_id)
+            )],
+        };
+    }
+
+    move_spawned_enemy(state, actor_id, &from_location_id, destination);
+    if actor_id == state.player_entity_id {
+        state.current_location_id = destination.to_owned();
+        state.known_locations.insert(destination.to_owned());
+        state.visited_locations.insert(destination.to_owned());
+        if let Some(instance) = state.location_instances.get_mut(destination) {
+            instance.known = true;
+            instance.visited = true;
+        }
+    }
+    let target_location_id = target_location_id.unwrap_or(destination).to_owned();
+    ActionOutcome {
+        events: vec![GameEvent::ActorMoved {
+            origin_id: actor_id.to_owned(),
+            from_location_id: from_location_id.clone(),
+            to_location_id: destination.to_owned(),
+            target_location_id,
+        }],
+        lines: vec![format!(
+            "{} shifts from {} toward {}.",
+            actor_display_name(state, bundle, actor_id),
+            location_display_name(bundle, &from_location_id),
+            location_display_name(bundle, destination)
+        )],
+    }
+}
+
+/// Resolves a named actor movement instruction into a bounded shared action. It identifies only
+/// existing actors and authored locations; validation and mutation still happen in
+/// `handle_actor_move` through the reducer.
+pub fn resolve_actor_move_intent(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    input: &str,
+) -> Option<Result<(String, String), String>> {
+    let normalized = input.to_ascii_lowercase();
+    let movement_word = ["go", "move", "walk", "head"].iter().any(|word| {
+        normalized
+            .split(|character: char| !character.is_alphabetic())
+            .any(|token| token == *word)
+    });
+    if !movement_word {
+        return None;
+    }
+
+    let location_id = state.current_location_id.as_str();
+    let actor = state
+        .runtime_actor_named_at(location_id, &normalized)
+        .map(|actor| (actor.entity_id, actor.name))?;
+    if !spawned_actor_can_move(state, bundle, &actor.0) {
+        return Some(Err(format!(
+            "{} cannot move: its movement capability is unavailable.",
+            actor.1
+        )));
+    }
+    let destination = bundle
+        .locations
+        .iter()
+        .find(|location| {
+            normalized.contains(&location.id.to_ascii_lowercase())
+                || normalized.contains(&location.name.to_ascii_lowercase())
+        })
+        .map(|location| location.id.clone());
+    Some(
+        destination
+            .ok_or_else(|| "Name an authored destination for that actor.".to_owned())
+            .map(|destination| (actor.0, destination)),
+    )
 }
 
 pub(super) enum SpawnedEnemyStep {
@@ -178,14 +412,14 @@ pub(super) fn spawned_enemy_active_attractor(
     state: &RunState,
     enemy_id: &str,
 ) -> SpawnedEnemyAttractor {
-    if let Some(location_id) = state.spawned_enemy_sight_targets.get(enemy_id) {
+    if let Some(location_id) = state.actor_sight_targets.get(enemy_id) {
         return SpawnedEnemyAttractor {
             kind: SpawnedEnemyAttractorKind::Sight,
             location_id: location_id.clone(),
         };
     }
 
-    if let Some(location_id) = state.spawned_enemy_targets.get(enemy_id) {
+    if let Some(location_id) = state.actor_noise_targets.get(enemy_id) {
         return SpawnedEnemyAttractor {
             kind: SpawnedEnemyAttractorKind::Noise,
             location_id: location_id.clone(),
@@ -205,7 +439,7 @@ pub(super) fn refresh_spawned_enemy_sight_target(
     enemy_id: &str,
     current_location_id: &str,
 ) -> bool {
-    if !spawned_enemy_can_see(bundle, enemy_id) {
+    if !spawned_enemy_can_see(state, bundle, enemy_id) {
         clear_spawned_enemy_sight_to_search(state, bundle, outcome, enemy_id);
         return false;
     }
@@ -218,7 +452,7 @@ pub(super) fn refresh_spawned_enemy_sight_target(
         let detect_chance_percent = sight_acquire_chance_percent(bundle);
         if roll_percent >= detect_chance_percent {
             outcome.events.push(GameEvent::SightAttractorMissed {
-                enemy_id: enemy_id.to_owned(),
+                origin_id: enemy_id.to_owned(),
                 subject_id: attractor.subject_id.clone(),
                 location_id: attractor.location_id.clone(),
                 detect_chance_percent,
@@ -226,7 +460,7 @@ pub(super) fn refresh_spawned_enemy_sight_target(
             });
             outcome.lines.push(format!(
                 "{} {}.",
-                enemy_display_name(bundle, enemy_id),
+                actor_display_name(state, bundle, enemy_id),
                 sight_miss_flavor_line(state, enemy_id, &attractor.subject_id)
             ));
             clear_spawned_enemy_sight_to_search(state, bundle, outcome, enemy_id);
@@ -234,30 +468,30 @@ pub(super) fn refresh_spawned_enemy_sight_target(
         }
 
         let target_changed = state
-            .spawned_enemy_sight_targets
+            .actor_sight_targets
             .get(enemy_id)
             .is_none_or(|location_id| location_id != &attractor.location_id)
             || state
-                .spawned_enemy_sight_subjects
+                .actor_sight_subjects
                 .get(enemy_id)
                 .is_none_or(|subject_id| subject_id != &attractor.subject_id);
         state
-            .spawned_enemy_sight_targets
+            .actor_sight_targets
             .insert(enemy_id.to_owned(), attractor.location_id.clone());
         state
-            .spawned_enemy_sight_subjects
+            .actor_sight_subjects
             .insert(enemy_id.to_owned(), attractor.subject_id.clone());
-        state.spawned_enemy_searching.remove(enemy_id);
+        state.actor_searching.remove(enemy_id);
         if target_changed {
             outcome.events.push(GameEvent::SightAttractorAcquired {
-                enemy_id: enemy_id.to_owned(),
+                origin_id: enemy_id.to_owned(),
                 subject_id: attractor.subject_id.clone(),
                 location_id: attractor.location_id.clone(),
             });
             outcome.lines.push(format!(
                 "{} catches sight of {} at {}.",
-                enemy_display_name(bundle, enemy_id),
-                subject_display_name(bundle, &attractor.subject_id),
+                actor_display_name(state, bundle, enemy_id),
+                subject_display_name(state, bundle, &attractor.subject_id),
                 location_display_name(bundle, &attractor.location_id)
             ));
         }
@@ -275,23 +509,23 @@ fn clear_spawned_enemy_sight_to_search(
     outcome: &mut ActionOutcome,
     enemy_id: &str,
 ) -> bool {
-    if state.spawned_enemy_sight_targets.contains_key(enemy_id)
-        || state.spawned_enemy_sight_delays.contains_key(enemy_id)
+    if state.actor_sight_targets.contains_key(enemy_id)
+        || state.actor_sight_delays.contains_key(enemy_id)
     {
-        state.spawned_enemy_sight_delays.remove(enemy_id);
+        state.actor_sight_delays.remove(enemy_id);
         let subject_id = state
-            .spawned_enemy_sight_subjects
+            .actor_sight_subjects
             .remove(enemy_id)
             .unwrap_or_else(|| "the last seen attractor".to_owned());
-        state.spawned_enemy_sight_targets.remove(enemy_id);
-        state.spawned_enemy_searching.insert(enemy_id.to_owned());
+        state.actor_sight_targets.remove(enemy_id);
+        state.actor_searching.insert(enemy_id.to_owned());
         outcome.events.push(GameEvent::SightAttractorLost {
-            enemy_id: enemy_id.to_owned(),
+            origin_id: enemy_id.to_owned(),
             subject_id: subject_id.clone(),
         });
         outcome.lines.push(format!(
             "{} {}.",
-            enemy_display_name(bundle, enemy_id),
+            actor_display_name(state, bundle, enemy_id),
             sight_lost_flavor_line(state, enemy_id, &subject_id)
         ));
         return true;
@@ -305,20 +539,21 @@ fn visible_sight_attractor_for_enemy(
     enemy_id: &str,
     current_location_id: &str,
 ) -> Option<SightAttractor> {
-    if spawned_enemy_can_see_location(
-        state,
-        bundle,
-        current_location_id,
-        &state.current_location_id,
-    ) {
+    if state.controlled_actor_is_alive()
+        && spawned_enemy_can_see_location(
+            state,
+            bundle,
+            current_location_id,
+            &state.current_location_id,
+        )
+    {
         return Some(SightAttractor {
-            subject_id: "player".to_owned(),
+            subject_id: state.player_entity_id.clone(),
             location_id: state.current_location_id.clone(),
         });
     }
 
-    if state.spawned_enemy_targets.contains_key(enemy_id)
-        && !state.spawned_enemy_searching.contains(enemy_id)
+    if state.actor_noise_targets.contains_key(enemy_id) && !state.actor_searching.contains(enemy_id)
     {
         return None;
     }
@@ -345,6 +580,22 @@ fn visible_sight_attractor_for_enemy(
             if state.bosses_alive.contains(subject_id) {
                 subjects.push(SightAttractor {
                     subject_id: subject_id.clone(),
+                    location_id: location_id.clone(),
+                });
+            }
+        }
+    }
+    for (location_id, npcs) in &state.location_npcs {
+        if !spawned_enemy_can_see_location(state, bundle, current_location_id, location_id) {
+            continue;
+        }
+        for npc in npcs {
+            if npc.lifecycle == InstanceLifecycle::Active
+                && is_noise_spawned_actor(&npc.instance_id)
+                && npc.instance_id != enemy_id
+            {
+                subjects.push(SightAttractor {
+                    subject_id: npc.instance_id.clone(),
                     location_id: location_id.clone(),
                 });
             }
@@ -485,7 +736,7 @@ fn spawned_enemy_return_step(
     current_location_id: &str,
     enemy_id: &str,
 ) -> SpawnedEnemyStep {
-    let Some(origin_location_id) = state.spawned_enemy_origins.get(enemy_id) else {
+    let Some(origin_location_id) = state.actor_origins.get(enemy_id) else {
         return SpawnedEnemyStep::Wait("searching without a known return point".to_owned());
     };
     if current_location_id == origin_location_id {
@@ -679,6 +930,9 @@ pub(super) fn break_movement_hazard(state: &mut RunState, hazard: &MovementHazar
         }
         MovementHazardKind::LockedGate => {
             state.locked_locations.remove(&hazard.location_id);
+            if let Some(instance) = state.location_instances.get_mut(&hazard.location_id) {
+                instance.locked = false;
+            }
             state
                 .broken_locked_locations
                 .insert(hazard.location_id.clone());
@@ -687,12 +941,13 @@ pub(super) fn break_movement_hazard(state: &mut RunState, hazard: &MovementHazar
 }
 
 pub(super) fn spawned_enemy_hazard_attack_line(
+    state: &RunState,
     bundle: &DatapackBundle,
     enemy_id: &str,
     hazard: &MovementHazard,
     broken: bool,
 ) -> String {
-    let enemy_name = enemy_display_name(bundle, enemy_id);
+    let enemy_name = actor_display_name(state, bundle, enemy_id);
     let location_name = location_display_name(bundle, &hazard.location_id);
     match (&hazard.kind, broken) {
         (MovementHazardKind::Barricade, true) => {
@@ -780,6 +1035,58 @@ pub(super) fn move_spawned_enemy(
     if let Some(entries) = state.location_enemies.get_mut(from_location_id) {
         entries.retain(|entry| entry != enemy_id);
     }
+    if state.bosses_alive.contains(enemy_id) {
+        if let Some(entries) = state.location_bosses.get_mut(from_location_id) {
+            entries.retain(|entry| entry != enemy_id);
+        }
+        let destination = state
+            .location_bosses
+            .entry(to_location_id.to_owned())
+            .or_default();
+        if !destination.iter().any(|entry| entry == enemy_id) {
+            destination.push(enemy_id.to_owned());
+        }
+        if let Some(instance) = state.boss_instances.get_mut(enemy_id) {
+            instance.location_id = to_location_id.to_owned();
+        }
+        return;
+    }
+    if let Some((from_bucket, npc_index)) =
+        state.location_npcs.iter().find_map(|(location_id, npcs)| {
+            (location_id == from_location_id)
+                .then(|| {
+                    npcs.iter()
+                        .position(|npc| npc.instance_id == enemy_id)
+                        .map(|index| (location_id.clone(), index))
+                })
+                .flatten()
+        })
+    {
+        let mut npc = state
+            .location_npcs
+            .get_mut(&from_bucket)
+            .and_then(|npcs| (npc_index < npcs.len()).then(|| npcs.remove(npc_index)))
+            .expect("spawned NPC location must remain stable during movement");
+        npc.location_id = to_location_id.to_owned();
+        state
+            .location_npcs
+            .entry(to_location_id.to_owned())
+            .or_default()
+            .push(npc);
+        return;
+    }
+    if let Some(item) = state.world_item_instances.get_mut(enemy_id) {
+        if let Some(entries) = state.location_items.get_mut(from_location_id) {
+            entries.retain(|entry| entry != enemy_id);
+        }
+        item.location_id = Some(to_location_id.to_owned());
+        state
+            .location_items
+            .entry(to_location_id.to_owned())
+            .or_default()
+            .push(enemy_id.to_owned());
+        return;
+    }
     let destination = state
         .location_enemies
         .entry(to_location_id.to_owned())
@@ -795,18 +1102,159 @@ pub(super) fn spawned_enemy_location(state: &RunState, enemy_id: &str) -> Option
         .iter()
         .find(|(_, enemy_ids)| enemy_ids.iter().any(|entry| entry == enemy_id))
         .map(|(location_id, _)| location_id.clone())
+        .or_else(|| {
+            state
+                .location_bosses
+                .iter()
+                .find(|(_, actor_ids)| actor_ids.iter().any(|entry| entry == enemy_id))
+                .map(|(location_id, _)| location_id.clone())
+        })
+        .or_else(|| {
+            state
+                .world_item_instances
+                .get(enemy_id)
+                .filter(|item| item.lifecycle == InstanceLifecycle::Active)
+                .and_then(|item| item.location_id.clone())
+        })
+        .or_else(|| {
+            state.location_npcs.iter().find_map(|(location_id, npcs)| {
+                npcs.iter()
+                    .any(|npc| {
+                        npc.instance_id == enemy_id && npc.lifecycle == InstanceLifecycle::Active
+                    })
+                    .then(|| location_id.clone())
+            })
+        })
 }
 
 pub(super) fn is_noise_spawned_enemy(enemy_id: &str) -> bool {
     enemy_id.starts_with("noise_spawn_")
 }
 
-pub(super) fn spawned_enemy_can_hear(bundle: &DatapackBundle, enemy_id: &str) -> bool {
-    find_enemy(bundle, enemy_id).is_some_and(|enemy| enemy.can_hear)
+pub(super) fn is_noise_spawned_actor(actor_id: &str) -> bool {
+    is_noise_spawned_enemy(actor_id)
 }
 
-fn spawned_enemy_can_see(bundle: &DatapackBundle, enemy_id: &str) -> bool {
-    find_enemy(bundle, enemy_id).is_some_and(|enemy| enemy.can_see)
+/// Actors enter the autonomous tracking loop only when they have a host-owned tracking policy.
+/// Legacy enemy/boss instances retain their historical noise-spawn behavior; runtime NPCs and
+/// world items opt in explicitly through noise or sight tracking rather than merely having legs.
+pub(super) fn autonomous_actor_ids(state: &RunState) -> Vec<String> {
+    let mut ids = state
+        .enemies_alive
+        .iter()
+        .chain(state.bosses_alive.iter())
+        .filter(|id| is_noise_spawned_actor(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    ids.extend(state.location_npcs.values().flat_map(|npcs| {
+        npcs.iter()
+            .filter(|npc| npc.lifecycle == InstanceLifecycle::Active)
+            .filter(|npc| {
+                is_noise_spawned_actor(&npc.instance_id)
+                    || npc.actor.has_capability(EngineCapability::NoiseTrack)
+                    || npc.actor.has_capability(EngineCapability::SightTrack)
+            })
+            .map(|npc| npc.instance_id.clone())
+    }));
+    ids.extend(
+        state
+            .world_item_instances
+            .values()
+            .filter(|item| {
+                item.lifecycle == InstanceLifecycle::Active
+                    && item.actor.as_ref().is_some_and(|actor| {
+                        is_noise_spawned_actor(&item.instance_id)
+                            || actor.has_capability(EngineCapability::NoiseTrack)
+                            || actor.has_capability(EngineCapability::SightTrack)
+                    })
+            })
+            .map(|item| item.instance_id.clone()),
+    );
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+pub(super) fn spawned_actor_can_hear(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    actor_id: &str,
+) -> bool {
+    // A persisted encounter is the authoritative mutable actor. Its template is only a
+    // compatibility fallback for old noise-spawn ids that have not yet been materialized.
+    if let Some(actor) = state.runtime_actor(actor_id) {
+        return actor.actor.has_hearing_contract()
+            && actor.actor.has_capability(EngineCapability::NoiseTrack);
+    }
+    if let Some(enemy) = find_enemy(bundle, actor_id) {
+        return enemy.can_hear
+            && (enemy.capabilities.is_empty()
+                || (capabilities::contains(&enemy.capabilities, EngineCapability::Hearing)
+                    && capabilities::contains(&enemy.capabilities, EngineCapability::NoiseTrack)));
+    }
+    if let Some(boss) = find_boss(bundle, actor_id) {
+        return boss.can_hear
+            && capabilities::contains(&boss.capabilities, EngineCapability::Hearing)
+            && capabilities::contains(&boss.capabilities, EngineCapability::NoiseTrack);
+    }
+    false
+}
+
+fn spawned_enemy_can_see(state: &RunState, bundle: &DatapackBundle, enemy_id: &str) -> bool {
+    if let Some(actor) = state.runtime_actor(enemy_id) {
+        return actor.actor.has_sight_contract()
+            && actor.actor.has_capability(EngineCapability::SightTrack);
+    }
+    if let Some(enemy) = find_enemy(bundle, enemy_id) {
+        return enemy.can_see
+            && (enemy.capabilities.is_empty()
+                || (capabilities::contains(&enemy.capabilities, EngineCapability::Sight)
+                    && capabilities::contains(&enemy.capabilities, EngineCapability::SightTrack)));
+    }
+    if let Some(boss) = find_boss(bundle, enemy_id) {
+        return boss.can_see
+            && capabilities::contains(&boss.capabilities, EngineCapability::Sight)
+            && capabilities::contains(&boss.capabilities, EngineCapability::SightTrack);
+    }
+    false
+}
+
+fn spawned_actor_can_move(state: &RunState, bundle: &DatapackBundle, actor_id: &str) -> bool {
+    if let Some(actor) = state.runtime_actor(actor_id) {
+        return actor.actor.has_movement_contract();
+    }
+    if let Some(enemy) = find_enemy(bundle, actor_id) {
+        return enemy.capabilities.is_empty()
+            || capabilities::contains(&enemy.capabilities, EngineCapability::Movement);
+    }
+    if let Some(boss) = find_boss(bundle, actor_id) {
+        return capabilities::contains(&boss.capabilities, EngineCapability::Movement);
+    }
+    false
+}
+
+/// New spawned encounters carry their own persisted capability envelope.  A pre-migration save
+/// can still contain a legacy `noise_spawn_*` id without an instance record, so fall back to its
+/// immutable template only for that compatibility shape.
+fn spawned_actor_has_combat_contract(
+    state: &RunState,
+    bundle: &DatapackBundle,
+    actor_id: &str,
+) -> bool {
+    if let Some(actor) = state.runtime_actor(actor_id) {
+        return actor.actor.is_combatant();
+    }
+    if let Some(enemy) = find_enemy(bundle, actor_id) {
+        return enemy.capabilities.is_empty()
+            || (capabilities::contains(&enemy.capabilities, EngineCapability::Health)
+                && capabilities::contains(&enemy.capabilities, EngineCapability::Combat));
+    }
+    if let Some(boss) = find_boss(bundle, actor_id) {
+        return boss.capabilities.is_empty()
+            || (capabilities::contains(&boss.capabilities, EngineCapability::Health)
+                && capabilities::contains(&boss.capabilities, EngineCapability::Combat));
+    }
+    false
 }
 
 fn enemy_search_salt(enemy_id: &str, location_id: &str, base: usize) -> usize {
@@ -891,18 +1339,26 @@ fn sight_lost_flavor_line(state: &RunState, enemy_id: &str, subject_id: &str) ->
         .to_owned()
 }
 
-pub(super) fn enemy_display_name(bundle: &DatapackBundle, enemy_id: &str) -> String {
-    find_enemy(bundle, enemy_id)
-        .map(|enemy| enemy.name.clone())
-        .unwrap_or_else(|| enemy_id.to_owned())
+fn actor_display_name(state: &RunState, bundle: &DatapackBundle, actor_id: &str) -> String {
+    state
+        .runtime_actor(actor_id)
+        .map(|actor| actor.name)
+        .or_else(|| {
+            find_enemy(bundle, actor_id)
+                .map(|enemy| enemy.name.clone())
+                .or_else(|| find_boss(bundle, actor_id).map(|boss| boss.name.clone()))
+        })
+        .unwrap_or_else(|| actor_id.to_owned())
 }
 
-fn subject_display_name(bundle: &DatapackBundle, subject_id: &str) -> String {
+fn subject_display_name(state: &RunState, bundle: &DatapackBundle, subject_id: &str) -> String {
     if subject_id == "player" {
         return "you".to_owned();
     }
-    find_enemy(bundle, subject_id)
-        .map(|enemy| enemy.name.clone())
+    state
+        .runtime_actor(subject_id)
+        .map(|actor| actor.name)
+        .or_else(|| find_enemy(bundle, subject_id).map(|enemy| enemy.name.clone()))
         .or_else(|| find_boss(bundle, subject_id).map(|boss| boss.name.clone()))
         .unwrap_or_else(|| subject_id.to_owned())
 }
@@ -911,4 +1367,33 @@ pub(super) fn location_display_name(bundle: &DatapackBundle, location_id: &str) 
     find_location(bundle, location_id)
         .map(|location| location.name.clone())
         .unwrap_or_else(|| location_id.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data::datapacks::load_datapack_bundle_by_folder;
+    use crate::game::generation::generate_new_run;
+
+    use super::{spawned_actor_can_hear, spawned_actor_can_move, spawned_enemy_can_see};
+
+    #[test]
+    fn persisted_encounter_capabilities_override_its_legacy_template_for_ai() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic").expect("fixture");
+        let mut state = generate_new_run(&bundle).state;
+        let encounter_id = state
+            .enemy_instances
+            .keys()
+            .next()
+            .expect("fixture enemy")
+            .clone();
+        state
+            .enemy_instances
+            .get_mut(&encounter_id)
+            .expect("fixture encounter")
+            .capabilities = vec!["health".to_owned()];
+
+        assert!(!spawned_actor_can_hear(&state, &bundle, &encounter_id));
+        assert!(!spawned_enemy_can_see(&state, &bundle, &encounter_id));
+        assert!(!spawned_actor_can_move(&state, &bundle, &encounter_id));
+    }
 }

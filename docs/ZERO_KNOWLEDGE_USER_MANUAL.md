@@ -1,6 +1,6 @@
 # Chatty Quest Zero-Spoiler User Manual
 
-Last updated: `2026-07-28`
+Last updated: `2026-09-29`
 
 ## What This Manual Is
 
@@ -51,9 +51,53 @@ If you already have a save you want to continue:
 
 - click `Load Game`
 
+## Narrator Setup
+
+Narration is optional. In Setup, select one of these narrator sources:
+
+- `Off` for deterministic game text only
+- `Mock Narrator` for local built-in flavor
+- `Local llama.cpp / GGUF` after placing a compatible GGUF in `models/local/`
+- `BYO API Key` for a hosted provider
+
+The BYO panel offers OpenAI, xAI, Anthropic, Google Gemini, and a custom OpenAI-compatible option.
+Choosing a provider fills a suggested model and endpoint; you may change both before pasting your
+key. Your API key is masked and exists only while the app is running. It is not stored in title
+settings or in a save.
+
+Your other Setup choices are remembered for the next launch, including the narrator choice, model
+or provider, endpoint, narration-event checkboxes, and play controls. You can still change them
+before starting a new run.
+
+## Talking To The Narrator
+
+The command bar accepts ordinary conversation as well as game commands. Recognized commands, such
+as `look` or `go <location>`, use the normal deterministic game rules. Other text can receive a
+narrator reply when a live narrator is available; that reply alone does not change the game.
+
+Depending on the proposal controls chosen in Setup, the narrator may also offer a bounded change as
+an approval card. You can edit the suggested fields, accept it, or reject it. Nothing from the card
+becomes real unless you accept it and the game validates it afterward.
+
+With a selected live narrator, the game commits a valid command before narration is requested and
+keeps the window responsive while the reply is composed. The log briefly says that narration is
+composing; wait for that response before sending the next command so turns stay in order.
+
+The narration-event checkboxes choose when narration appears. The Tight, Guided, Loose, and Wild
+control separately changes how often eligible free text may produce an approval card: never, rarely,
+often, or on every eligible opportunity. It does not let narration bypass the rules.
+
 ## What You Are Looking At
 
 Once the run begins, the app is split into a few important areas.
+
+## Abilities and Progression
+
+If your scenario grants abilities, the Character tab is the authoritative place to inspect them.
+It shows access requirements, available uses, temporary duration, and any eligible unlocks. Use an
+ability with `cast <ability> at <target>`; use the `Learn` button or `learn <ability>` only when an
+unlock is shown. Charges and temporary access belong to your particular grant, not to the shared
+ability definition.
 
 ### Left Panel
 
@@ -98,6 +142,12 @@ This contains:
 - the command input field
 
 If you prefer clicking over typing, this helps a lot.
+
+Selecting a visible person, creature, or item with its **Focus** button also updates the quick
+actions for that thing. The list stays deliberately short: enemies offer combat and any spell
+that can actually target them, while friendly or neutral actors can offer helpful interaction or
+real item hand-offs. You can still type other supported commands; a button is only a convenient
+current suggestion, and the game checks it again when used.
 
 ### Inventory Tab
 
@@ -145,7 +195,7 @@ You can type:
 - `take <item>`
 - `equip <item>`
 - `use <item>`
-- `attack`
+- `attack [target]`
 - `wait`
 
 Examples:
@@ -155,6 +205,7 @@ Examples:
 - `inspect torch`
 - `take medkit`
 - `attack`
+- `attack <target>`
 
 The game also understands a few aliases:
 
@@ -227,11 +278,13 @@ It is the clearest command when you know exactly what you are trying to open.
 
 Use this to secure a route from inside the room, if that room supports it and you have what you need.
 
-### `attack`
+### `attack [target]`
 
 Attacks a live threat in your current room.
 
-You do not manually choose a target in the current build.
+With no target, the game selects its normal valid hostile target. With a target, it attempts that
+specific visible hostile. A named friendly person or an invalid target is not silently treated as
+a successful attack.
 
 ### `wait`
 

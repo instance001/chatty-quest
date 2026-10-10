@@ -188,7 +188,7 @@ The following should work:
 - objective progress lines surface when a tracked condition changes state
 - objective-related state progresses when the required conditions are met
 - objective completion is driven by structured state rather than narrator prose
-- win or loss is surfaced clearly in UI state as well as narration
+- win or controlled-actor incapacity is surfaced clearly in UI state as well as narration
 - after a win, the run enters an epilogue-friendly state where exploration and inspection can continue, datapack-authored aftermath room text and post-credits hooks can surface, and combat, pressure, and resource mutation do not keep pretending the main scenario is unresolved
 - guided command or helper surfaces can point toward the next likely objective verb without forcing the player to use them
 

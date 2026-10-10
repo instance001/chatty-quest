@@ -2,7 +2,8 @@
 
 ## Purpose
 
-This document defines the intended `v0.1` shape for the Chatty Quest media panel.
+This document defines the active media-panel contract for Chatty Quest. Historical `v0.1` wording
+is retained only where it records the original release boundary.
 
 The media panel exists to:
 
@@ -31,16 +32,16 @@ Short version:
 - event truth in
 - presentation out
 
-## `v0.1` Role
+## Current Role
 
-For `v0.1`, the media panel should:
+The media panel currently:
 
 - stay visible beside the chat area in the `Game` tab
 - follow the current visual focus rule
 - show whether focused media is present, missing, or placeholder-backed
 - support enlargement through the shared asset viewer
 
-It does not need to be a full cinematic system yet.
+It is not a full cinematic system and it does not own game truth.
 
 ## Focus Model
 
@@ -53,13 +54,45 @@ Current practical drivers:
 - live local threats
 - item or enemy focus from inspect, equip, take, use, or combat actions
 
-Recommended focus direction:
+Current focus direction:
 
 - location-forward beats prefer place after override
 - item-forward beats prefer the focused item after override
 - combat-forward beats prefer the focused threat after override
 
 This should follow the same dual-context and fallback rules already documented elsewhere.
+
+The panel also exposes focus controls for host-confirmed entities visible in the current map tile.
+Choosing one changes only presentation focus; it does not issue an action, change control, or
+alter encounter state. This makes multiple enemies, NPCs, bosses, and actor-capable items
+inspectable without inventing a map-specific interaction system.
+
+The Game action bar may then derive a short, focus-specific set of valid-looking commands from
+the selected entity and current runtime contracts. This is deliberately a separate presentation
+step from focus selection: a hostile focus can surface combat and compatible player abilities,
+while a non-hostile inventory endpoint can surface applicable hand-offs. Focus never bypasses the
+command parser or reducer, and impossible social, transfer, healing, or revival actions must not
+be advertised merely because an entity is visible.
+
+## Role And Pool Resolution
+
+Media is selected by semantic role (`scene_location`, `encounter_portrait`, `combat_reaction`,
+`inspection_image`, `ambient_sound`, or `short_motion`) rather than by one mandatory file per
+template. Resolution is hierarchical:
+
+```text
+exact template asset
+-> template-preferred tag/pool
+-> subtype or family pool
+-> broad category pool
+-> global fallback
+```
+
+Eligible pools vary their selections and avoid immediate repeats when possible. Selection can use
+the run's deterministic cursor so a save/load or replay remains coherent. Proposal-created and
+player-library templates use this same resolver; absent bespoke media is a normal fallback case,
+not missing mechanics. The inspection surface reports the selected asset, role, pool/source, and
+fallback status.
 
 ## Data Contract
 

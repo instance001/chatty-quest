@@ -64,12 +64,26 @@ pub(super) fn inspect_enemy_state_lines(
         .into_iter()
         .flatten()
         .any(|current_id| current_id == enemy_id && alive);
+    let runtime_actor = state.runtime_actor(enemy_id);
+    let has_health_contract = runtime_actor
+        .as_ref()
+        .map(|actor| actor.actor.has_health_contract())
+        // A missing runtime instance is an old-save compatibility shape; preserve its
+        // historical presentation until it is materialized.
+        .unwrap_or(true);
 
-    let mut lines = vec![format!(
-        "Threat state: {} | HP remaining: {}",
-        if alive { "active" } else { "defeated" },
-        remaining_hp
-    )];
+    let mut lines = vec![if has_health_contract {
+        format!(
+            "Threat state: {} | HP remaining: {}",
+            if alive { "active" } else { "defeated" },
+            remaining_hp
+        )
+    } else {
+        format!(
+            "Threat state: {} | health contract: unavailable",
+            if alive { "active" } else { "defeated" }
+        )
+    }];
 
     if alive {
         lines.push(format!(
@@ -78,8 +92,15 @@ pub(super) fn inspect_enemy_state_lines(
         ));
     }
 
-    if let Some(enemy) = find_enemy(bundle, enemy_id) {
+    if let Some(actor) = runtime_actor {
+        lines.push(sense_line(
+            actor.actor.has_hearing_contract(),
+            actor.actor.has_sight_contract(),
+        ));
+    } else if let Some(enemy) = find_enemy(bundle, enemy_id) {
         lines.push(sense_line(enemy.can_hear, enemy.can_see));
+    }
+    if let Some(enemy) = find_enemy(bundle, enemy_id) {
         let inspect_line = if alive {
             enemy.inspect_alive_line.as_deref()
         } else {
@@ -106,12 +127,24 @@ pub(super) fn inspect_boss_state_lines(
         .into_iter()
         .flatten()
         .any(|current_id| current_id == boss_id && alive);
+    let runtime_actor = state.runtime_actor(boss_id);
+    let has_health_contract = runtime_actor
+        .as_ref()
+        .map(|actor| actor.actor.has_health_contract())
+        .unwrap_or(true);
 
-    let mut lines = vec![format!(
-        "Threat state: {} | HP remaining: {}",
-        if alive { "active" } else { "defeated" },
-        remaining_hp
-    )];
+    let mut lines = vec![if has_health_contract {
+        format!(
+            "Threat state: {} | HP remaining: {}",
+            if alive { "active" } else { "defeated" },
+            remaining_hp
+        )
+    } else {
+        format!(
+            "Threat state: {} | health contract: unavailable",
+            if alive { "active" } else { "defeated" }
+        )
+    }];
 
     if alive {
         lines.push(format!(
@@ -120,22 +153,28 @@ pub(super) fn inspect_boss_state_lines(
         ));
     }
 
-    if let Some(boss) = find_boss(bundle, boss_id) {
+    if let Some(actor) = runtime_actor {
+        lines.push(sense_line(
+            actor.actor.has_hearing_contract(),
+            actor.actor.has_sight_contract(),
+        ));
+    } else if let Some(boss) = find_boss(bundle, boss_id) {
         lines.push(sense_line(boss.can_hear, boss.can_see));
-
-        if boss_wounded_phase_active(boss, remaining_hp) {
+    }
+    if let Some(boss) = find_boss(bundle, boss_id) {
+        if has_health_contract && boss_wounded_phase_active(boss, remaining_hp) {
             lines.push(
                 boss.wounded_phase_inspect_active
                     .clone()
                     .unwrap_or_else(|| "Final phase: wounded and more dangerous.".to_owned()),
             );
-        } else if boss.wounded_phase_hp_threshold.is_some() && alive {
+        } else if has_health_contract && boss.wounded_phase_hp_threshold.is_some() && alive {
             lines.push(
                 boss.wounded_phase_inspect_pending
                     .clone()
                     .unwrap_or_else(|| "Final phase: not yet active.".to_owned()),
             );
-        } else if boss.wounded_phase_hp_threshold.is_some() {
+        } else if has_health_contract && boss.wounded_phase_hp_threshold.is_some() {
             lines.push(
                 boss.wounded_phase_inspect_defeated
                     .clone()

@@ -2,11 +2,10 @@
 
 ## Purpose
 
-This document defines the pre-LLM narrator contract for Chatty Quest and the RD Engine.
+This document defines the narrator-context contract for Chatty Quest and the RD Engine.
 
-The goal is not to connect a live model yet.
-
-The goal is to make sure every future narrator receives bounded, reducer-confirmed truth instead of raw mutable game internals or prose that it has to reinterpret.
+The goal is to make sure every narrator—Mock, local GGUF, or hosted BYO provider—receives bounded,
+host-selected information instead of raw mutable game internals or prose it has to reinterpret.
 
 Short rule:
 
@@ -24,7 +23,8 @@ The current branch introduces:
 
 These live in `src/game/narrator.rs`.
 
-`MockNarrator` now builds and consumes this context for action narration. That proves the seam before any live LLM adapter exists.
+`MockNarrator` and live narrator adapters build on this bounded context. A live adapter has separate
+plain-text narration and compact proposal lanes; neither receives authority to mutate state.
 
 Raw player text is resolved before this context is built. The command boundary is documented in [COMMAND_BOUNDARY_SPEC.md](COMMAND_BOUNDARY_SPEC.md).
 
@@ -35,7 +35,7 @@ Raw player text is resolved before this context is built. The command boundary i
 - attempted action, when there is one
 - reducer output lines
 - structured event facts derived from `GameEvent`
-- run phase: `Active`, `Epilogue`, or `Loss`
+- run phase: `Active`, `Epilogue`, or `Incapacitated` (the 0-HP controlled actor state, which is reversible)
 - current location id, name, description, and narrator brief
 - current focus brief derived from reducer-confirmed event focus
 - visible exits with locked and barricaded state
@@ -48,14 +48,13 @@ Raw player text is resolved before this context is built. The command boundary i
 - datapack DM style and world tone capsules
 - explicit narrator safety rules
 
-This is intentionally small. It should grow only when a real narrator needs a new confirmed fact.
+This is intentionally small. It should grow only when a narrator needs a new confirmed fact.
 
 ## Safety Rules
 
-The context carries safety rules that future narrator adapters should treat as hard constraints:
+The context carries safety rules that narrator adapters must treat as hard constraints:
 
-- do not invent permanent items
-- do not invent canonical locations
+- do not claim permanent items or canonical locations exist
 - do not alter HP, inventory, equipment, lock state, barricade state, objective state, or player location
 - do not claim a reducer action succeeded if the event facts say it was rejected or blocked
 - treat reducer lines and event facts as authoritative
@@ -84,20 +83,19 @@ The context must not:
 - turn narrator prose into mechanics
 - carry speculative future outcomes
 
-## Future LLM Adapter Shape
+## Live Narrator Adapter Shape
 
-A future LLM narrator should sit behind the same `Narrator` trait or a successor with equivalent boundaries.
+A live narrator sits behind the same bounded narrator seam as the Mock narrator. It receives a
+`NarratorContext`, not raw game state.
 
-The adapter should receive a `NarratorContext`, not raw game state.
-
-The adapter may produce:
+The narration lane may produce:
 
 - atmospheric prose
 - social texture
 - clearer phrasing of reducer-confirmed outcomes
 - tone-consistent epilogue narration
 
-The adapter may not produce:
+The narration lane may not produce:
 
 - new canonical items
 - new canonical locations
@@ -106,15 +104,17 @@ The adapter may not produce:
 - unconfirmed objective progress
 - alternate combat results
 
+For an eligible free-text turn, the host can independently allow a separate proposal lane. The host
+first chooses authorized form kinds, then asks the narrator to select one and fill a small flat form.
+The host parses and validates those fields, the player may edit the approval card, and a reducer
+alone commits an accepted proposal. The adapter never constructs a canonical internal JSON object or
+applies a mutation itself.
+
 ## Current Non-Goals
 
-Do not add these yet:
+Current non-goals remain:
 
-- live LLM API calls
-- prompt streaming
-- tool calls from the narrator
-- narrator-owned memory
-- hidden narrator state
-- broad natural-language command interpretation
-
-Those can come later only after the context contract has stayed stable under the mock narrator and demo datapack.
+- narrator tool calls or direct action execution
+- narrator-owned hidden state
+- unrestricted natural-language command interpretation
+- narration as an alternative source of saved truth

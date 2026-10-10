@@ -43,6 +43,7 @@ narrator_brief = "Keep the kitchen tense and domestic at the same time, like a r
 tags = ["indoor", "loot_possible", "healing_route"]
 connections = ["front_verandah", "laundry"]
 items = ["medkit"]
+npcs = ["kitchen_neighbour"]
 enemies = []
 bosses = []
 
@@ -60,7 +61,7 @@ epilogue_hook = "Post-credits hook: the washing machine coughs once after the ho
 narrator_brief = "Make this room feel cramped, damp, and faintly ridiculous, like a place where panic has to squeeze sideways to fit."
 tags = ["indoor", "utility", "flavor_loot"]
 connections = ["kitchen"]
-items = ["house_keys"]
+items = ["house_keys", "grave_scroll"]
 enemies = []
 bosses = []
 

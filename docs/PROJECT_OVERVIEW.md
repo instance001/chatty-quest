@@ -18,7 +18,7 @@ Shorter doctrine line:
 
 `Radiant adventure feel, deterministic game truth.`
 
-## What `v0.1` Is
+## Historical `v0.1` Release
 
 `v0.1` is the first honest playable slice of the larger engine vision.
 
@@ -36,7 +36,28 @@ It exists to prove:
 - a mock narrator can provide chat-style presentation without owning truth
 - save/load and validation can make the run trustworthy
 
-`v0.1` is not trying to solve every future scenario type, world scale, or AI integration problem.
+`v0.1` did not try to solve every future scenario type, world scale, or AI integration problem.
+
+## Current Engine Substrate
+
+The active branch keeps the release's deterministic core and adds reusable primitives rather than
+one-off noun-specific systems:
+
+- capability-gated dependent schemas, with a capability as the root of every applicable
+  mechanical contract;
+- runtime actors and controller-neutral actions, so player, NPC, enemy, boss, and actor-capable
+  item use the same combat, movement, inventory, ability, and timing paths when capable;
+- one canonical event projection (`type | origin | impact | outcome`) for narration, media,
+  diagnostics, summaries, and action traces;
+- entity-agnostic item ownership through `TransferItem` and `ItemTransferred`;
+- immutable ability templates plus owned `AbilityGrant` instances for charges, expiry, cooldown,
+  temporary access, learning, and actor-local progression;
+- semantic media roles and hierarchical pools, with deterministic fallback and inspection;
+- host-selected, bounded narrator proposals that are validated, player-approved, and reducer
+  committed before they become canonical.
+
+This is still deliberately bounded. It is a substrate for future content families, not a claim
+that quests, trade, memory, magic schools, or negotiation have all been implemented.
 
 ## Why The Host Owns State
 
@@ -62,6 +83,9 @@ The engine therefore owns:
 - locked and unlocked locations
 - scenario boundaries
 - save data
+- actor identities, control, health, readiness, capabilities, and owned ability grants
+- item ownership and equipment relationships
+- per-actor progress pools and unlock state
 
 The narrator may describe truth, but it does not create truth.
 
@@ -100,7 +124,9 @@ Longer-term, the engine should continue moving toward a clean three-part content
 - instance = this spawned copy
 - bucket = where that instance currently lives or what state currently applies
 
-`v0.1` does not need every instance system fully generalized yet, but the future shape should stay visible.
+The current runtime now materializes entity and ability instances where mutable ownership or
+lifetimes require them. It still preserves the template = blueprint, instance = copy, bucket =
+current relationship distinction rather than hiding it in narrator prose.
 
 The implementation-facing runtime contract for that split is documented in [RUNTIME_MODEL_SPEC.md](RUNTIME_MODEL_SPEC.md).
 
@@ -124,11 +150,10 @@ It demonstrates the system clearly:
 
 The property itself is the playable map in `v0.1`. That is a scenario rule, not a permanent engine law.
 
-## What `v0.1` Deliberately Excludes
+## Historical `v0.1` Exclusions
 
-`v0.1` deliberately excludes:
+The following describes the original release boundary, not necessarily the current branch:
 
-- live LLM calls
 - multiplayer
 - peer-to-peer networking
 - live Chatty ecosystem handoff
@@ -137,7 +162,7 @@ The property itself is the playable map in `v0.1`. That is a scenario rule, not 
 - party systems
 - overworld mode
 - unrestricted natural language understanding
-- dynamic media generation
+- narrator-controlled mechanics
 
 It also does not require:
 

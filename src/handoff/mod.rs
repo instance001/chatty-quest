@@ -84,35 +84,35 @@ pub struct SnapshotEncounterState {
     pub local_live_bosses: Vec<String>,
     pub defeated_enemies: Vec<String>,
     pub defeated_bosses: Vec<String>,
-    pub spawned_enemy_targets: Vec<SnapshotSpawnedEnemyTarget>,
-    pub spawned_enemy_origins: Vec<SnapshotSpawnedEnemyOrigin>,
-    pub spawned_enemy_searching: Vec<String>,
-    pub spawned_enemy_sight_targets: Vec<SnapshotSpawnedEnemySightTarget>,
-    pub spawned_enemy_sight_delays: Vec<SnapshotSpawnedEnemySightDelay>,
+    pub actor_noise_targets: Vec<SnapshotActorNoiseTarget>,
+    pub actor_origins: Vec<SnapshotActorOrigin>,
+    pub actor_searching: Vec<String>,
+    pub actor_sight_targets: Vec<SnapshotActorSightTarget>,
+    pub actor_sight_delays: Vec<SnapshotActorSightDelay>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SnapshotSpawnedEnemyTarget {
-    pub enemy_id: String,
+pub struct SnapshotActorNoiseTarget {
+    pub actor_id: String,
     pub target_location_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SnapshotSpawnedEnemyOrigin {
-    pub enemy_id: String,
+pub struct SnapshotActorOrigin {
+    pub actor_id: String,
     pub origin_location_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SnapshotSpawnedEnemySightTarget {
-    pub enemy_id: String,
+pub struct SnapshotActorSightTarget {
+    pub actor_id: String,
     pub subject_id: String,
     pub location_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SnapshotSpawnedEnemySightDelay {
-    pub enemy_id: String,
+pub struct SnapshotActorSightDelay {
+    pub actor_id: String,
     pub remaining_ticks: u8,
 }
 
@@ -189,8 +189,8 @@ pub fn build_run_snapshot_envelope(
                 known_connected_exits,
             },
             player_state: SnapshotPlayerState {
-                hp: run.hp,
-                max_hp: run.max_hp,
+                hp: run.controlled_actor_health().0,
+                max_hp: run.controlled_actor_health().1,
                 turn_index: run.turn_index,
                 noise_level: run.noise_level,
                 run_phase,
@@ -223,15 +223,22 @@ pub fn build_run_snapshot_envelope(
                 ),
                 defeated_enemies: sorted_strings(&run.enemies_defeated),
                 defeated_bosses: sorted_strings(&run.bosses_defeated),
-                spawned_enemy_targets: spawned_enemy_targets(run),
-                spawned_enemy_origins: spawned_enemy_origins(run),
-                spawned_enemy_searching: sorted_strings(&run.spawned_enemy_searching),
-                spawned_enemy_sight_targets: spawned_enemy_sight_targets(run),
-                spawned_enemy_sight_delays: spawned_enemy_sight_delays(run),
+                actor_noise_targets: actor_noise_targets(run),
+                actor_origins: actor_origins(run),
+                actor_searching: sorted_strings(&run.actor_searching),
+                actor_sight_targets: actor_sight_targets(run),
+                actor_sight_delays: actor_sight_delays(run),
             },
             inventory_state: SnapshotInventoryState {
-                carried_items: run.inventory.iter().map(|item| item.id.clone()).collect(),
-                equipped_item_id: run.equipped_item_id.clone(),
+                carried_items: run
+                    .controlled_inventory()
+                    .into_iter()
+                    .flatten()
+                    .map(|item| item.id.clone())
+                    .collect(),
+                equipped_item_id: run
+                    .equipped_item_id_for_owner(&run.controlled_inventory_owner())
+                    .map(ToOwned::to_owned),
             },
             recent_events: recent_events
                 .iter()
@@ -246,66 +253,60 @@ pub fn build_run_snapshot_envelope(
     }
 }
 
-fn spawned_enemy_targets(run: &RunState) -> Vec<SnapshotSpawnedEnemyTarget> {
+fn actor_noise_targets(run: &RunState) -> Vec<SnapshotActorNoiseTarget> {
     let mut targets = run
-        .spawned_enemy_targets
+        .actor_noise_targets
         .iter()
-        .map(
-            |(enemy_id, target_location_id)| SnapshotSpawnedEnemyTarget {
-                enemy_id: enemy_id.clone(),
-                target_location_id: target_location_id.clone(),
-            },
-        )
+        .map(|(actor_id, target_location_id)| SnapshotActorNoiseTarget {
+            actor_id: actor_id.clone(),
+            target_location_id: target_location_id.clone(),
+        })
         .collect::<Vec<_>>();
-    targets.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    targets.sort_by(|left, right| left.actor_id.cmp(&right.actor_id));
     targets
 }
 
-fn spawned_enemy_origins(run: &RunState) -> Vec<SnapshotSpawnedEnemyOrigin> {
+fn actor_origins(run: &RunState) -> Vec<SnapshotActorOrigin> {
     let mut origins = run
-        .spawned_enemy_origins
+        .actor_origins
         .iter()
-        .map(
-            |(enemy_id, origin_location_id)| SnapshotSpawnedEnemyOrigin {
-                enemy_id: enemy_id.clone(),
-                origin_location_id: origin_location_id.clone(),
-            },
-        )
+        .map(|(actor_id, origin_location_id)| SnapshotActorOrigin {
+            actor_id: actor_id.clone(),
+            origin_location_id: origin_location_id.clone(),
+        })
         .collect::<Vec<_>>();
-    origins.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    origins.sort_by(|left, right| left.actor_id.cmp(&right.actor_id));
     origins
 }
 
-fn spawned_enemy_sight_targets(run: &RunState) -> Vec<SnapshotSpawnedEnemySightTarget> {
+fn actor_sight_targets(run: &RunState) -> Vec<SnapshotActorSightTarget> {
     let mut targets = run
-        .spawned_enemy_sight_targets
+        .actor_sight_targets
         .iter()
-        .map(|(enemy_id, location_id)| SnapshotSpawnedEnemySightTarget {
-            enemy_id: enemy_id.clone(),
+        .map(|(actor_id, location_id)| SnapshotActorSightTarget {
+            actor_id: actor_id.clone(),
             subject_id: run
-                .spawned_enemy_sight_subjects
-                .get(enemy_id)
+                .actor_sight_subjects
+                .get(actor_id)
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_owned()),
             location_id: location_id.clone(),
         })
         .collect::<Vec<_>>();
-    targets.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    targets.sort_by(|left, right| left.actor_id.cmp(&right.actor_id));
     targets
 }
 
-fn spawned_enemy_sight_delays(run: &RunState) -> Vec<SnapshotSpawnedEnemySightDelay> {
+fn actor_sight_delays(run: &RunState) -> Vec<SnapshotActorSightDelay> {
     let mut delays = run
-        .spawned_enemy_sight_delays
+        .actor_sight_delays
         .iter()
-        .map(
-            |(enemy_id, remaining_ticks)| SnapshotSpawnedEnemySightDelay {
-                enemy_id: enemy_id.clone(),
-                remaining_ticks: *remaining_ticks,
-            },
-        )
+        .map(|(actor_id, remaining_ticks)| SnapshotActorSightDelay {
+            actor_id: actor_id.clone(),
+            remaining_ticks: *remaining_ticks,
+        })
         .collect::<Vec<_>>();
-    delays.sort_by(|left, right| left.enemy_id.cmp(&right.enemy_id));
+    delays.sort_by(|left, right| left.actor_id.cmp(&right.actor_id));
     delays
 }
 
@@ -334,8 +335,8 @@ fn local_live_ids(
 fn important_flags(run: &RunState) -> Vec<String> {
     let mut flags = Vec::new();
 
-    if run.hp <= 0 {
-        flags.push("run_lost".to_owned());
+    if !run.controlled_actor_is_alive() {
+        flags.push("controlled_actor_incapacitated".to_owned());
     }
     if run.active_objective.completed {
         flags.push("objective_complete".to_owned());
@@ -366,25 +367,25 @@ mod tests {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
         let mut run = generate_new_run(&bundle).state;
-        run.spawned_enemy_targets.insert(
+        run.actor_noise_targets.insert(
             "noise_spawn_1_shambler_front_gate".to_owned(),
             "front_verandah".to_owned(),
         );
-        run.spawned_enemy_origins.insert(
+        run.actor_origins.insert(
             "noise_spawn_1_shambler_front_gate".to_owned(),
             "back_garden".to_owned(),
         );
-        run.spawned_enemy_searching
+        run.actor_searching
             .insert("noise_spawn_1_shambler_front_gate".to_owned());
-        run.spawned_enemy_sight_targets.insert(
+        run.actor_sight_targets.insert(
             "noise_spawn_1_shambler_front_gate".to_owned(),
             "kitchen".to_owned(),
         );
-        run.spawned_enemy_sight_subjects.insert(
+        run.actor_sight_subjects.insert(
             "noise_spawn_1_shambler_front_gate".to_owned(),
             "player".to_owned(),
         );
-        run.spawned_enemy_sight_delays
+        run.actor_sight_delays
             .insert("noise_spawn_1_shambler_front_gate".to_owned(), 1);
         let moved = apply_action(
             &mut run,
@@ -416,10 +417,10 @@ mod tests {
             envelope
                 .body
                 .encounter_state
-                .spawned_enemy_targets
+                .actor_noise_targets
                 .iter()
                 .any(
-                    |target| target.enemy_id == "noise_spawn_1_shambler_front_gate"
+                    |target| target.actor_id == "noise_spawn_1_shambler_front_gate"
                         && target.target_location_id == "front_verandah"
                 )
         );
@@ -427,10 +428,10 @@ mod tests {
             envelope
                 .body
                 .encounter_state
-                .spawned_enemy_origins
+                .actor_origins
                 .iter()
                 .any(
-                    |origin| origin.enemy_id == "noise_spawn_1_shambler_front_gate"
+                    |origin| origin.actor_id == "noise_spawn_1_shambler_front_gate"
                         && origin.origin_location_id == "back_garden"
                 )
         );
@@ -438,39 +439,28 @@ mod tests {
             envelope
                 .body
                 .encounter_state
-                .spawned_enemy_searching
+                .actor_searching
                 .contains(&"noise_spawn_1_shambler_front_gate".to_owned())
         );
         assert!(
             envelope
                 .body
                 .encounter_state
-                .spawned_enemy_sight_targets
+                .actor_sight_targets
                 .iter()
                 .any(
-                    |target| target.enemy_id == "noise_spawn_1_shambler_front_gate"
+                    |target| target.actor_id == "noise_spawn_1_shambler_front_gate"
                         && target.subject_id == "player"
                         && target.location_id == "kitchen"
                 )
         );
-        assert!(
-            envelope
-                .body
-                .encounter_state
-                .spawned_enemy_sight_delays
-                .iter()
-                .any(
-                    |delay| delay.enemy_id == "noise_spawn_1_shambler_front_gate"
-                        && delay.remaining_ticks == 1
-                )
-        );
-        assert!(
-            envelope
-                .body
-                .rolling_summary
-                .iter()
-                .any(|line| line.contains("Moved from 'front_verandah' to 'kitchen'"))
-        );
+        assert!(envelope.body.encounter_state.actor_sight_delays.iter().any(
+            |delay| delay.actor_id == "noise_spawn_1_shambler_front_gate"
+                && delay.remaining_ticks == 1
+        ));
+        assert!(envelope.body.rolling_summary.iter().any(|line| {
+            line == "Action [movement] player -> kitchen: moved from front_verandah"
+        }));
     }
 
     #[test]

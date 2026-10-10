@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::data::datapacks::{DatapackBundle, LocationTemplate};
+use crate::data::datapacks::{AbilityEffect, DatapackBundle, LocationTemplate};
 use crate::diagnostics::DiagnosticReport;
 use crate::game::derived::{
     ObjectiveConditionRowStyle, attractor_summary_rows, finale_security_secured,
     objective_condition_rows, run_phase_label, security_summary_rows, utility_relevance_rows,
 };
-use crate::game::{RunState, location_description_for_state};
+use crate::game::{ActorDisposition, RunState, RuntimeActorView, location_description_for_state};
 use crate::media::{MediaPanelState, resolve_location_tile_image, resolve_primary_image};
 use crate::ui::views::{AssetViewerRequest, GeneratedMapLayout, MapTileLayout};
 
@@ -24,6 +24,10 @@ pub struct InventoryRowModel {
     pub damage: i32,
     pub equipped: bool,
     pub has_template: bool,
+    pub is_runtime_admission: bool,
+    pub is_inventory_endpoint: bool,
+    pub contained_item_count: usize,
+    pub actor_contract_line: Option<String>,
 }
 
 #[derive(Clone)]
@@ -129,6 +133,7 @@ pub struct InventoryActionRowModel {
     pub equip_command: Option<String>,
     pub use_command: String,
     pub show_view_button: bool,
+    pub actor_contract_line: Option<String>,
     pub template_warning: Option<String>,
 }
 
@@ -282,16 +287,41 @@ pub fn build_inventory_rows(
     run: &RunState,
     bundle: Option<&DatapackBundle>,
 ) -> Vec<InventoryRowModel> {
-    run.inventory
-        .iter()
+    let owner = run.controlled_inventory_owner();
+    let equipped_item_id = run.equipped_item_id_for_owner(&owner);
+    run.controlled_inventory()
+        .into_iter()
+        .flat_map(|inventory| inventory.iter())
         .map(|item| InventoryRowModel {
             item_id: item.id.clone(),
             item_name: item.name.clone(),
             description: item.description.clone(),
             damage: item.damage,
-            equipped: run.equipped_item_id.as_deref() == Some(item.id.as_str()),
+            equipped: equipped_item_id == Some(item.id.as_str()),
             has_template: bundle
                 .is_some_and(|bundle| bundle.items.iter().any(|candidate| candidate.id == item.id)),
+            is_runtime_admission: matches!(item.origin, crate::game::ItemOrigin::NarratorApproved),
+            is_inventory_endpoint: item.actor.as_ref().is_some_and(|actor| {
+                actor.has_capability(crate::game::capabilities::EngineCapability::Inventory)
+            }),
+            contained_item_count: item.inventory.len(),
+            actor_contract_line: item.actor.as_ref().map(|actor| {
+                let capabilities = if actor.capabilities.is_empty() {
+                    "none".to_owned()
+                } else {
+                    actor.capabilities.join(", ")
+                };
+                format!(
+                    "Actor contract: {} · combat: {} · command: {} attack <target>",
+                    capabilities,
+                    if actor.is_combatant() {
+                        "ready"
+                    } else {
+                        "unavailable"
+                    },
+                    item.name
+                )
+            }),
         })
         .collect()
 }
@@ -300,9 +330,10 @@ pub fn build_game_header_chips(run: Option<&RunState>, chaos_mode: f32) -> Vec<S
     let mut chips = Vec::new();
 
     if let Some(run) = run {
+        let (hp, max_hp) = run.controlled_actor_health();
         chips.push(StatusChipModel {
             label: "HP".to_owned(),
-            value: format!("{} / {}", run.hp, run.max_hp),
+            value: format!("{} / {}", hp, max_hp),
         });
         chips.push(StatusChipModel {
             label: "Phase".to_owned(),
@@ -337,11 +368,14 @@ pub fn build_game_header_chips(run: Option<&RunState>, chaos_mode: f32) -> Vec<S
 pub fn build_outcome_banner(run: Option<&RunState>) -> Option<OutcomeBannerModel> {
     let run = run?;
 
-    if run.hp <= 0 {
+    if !run.controlled_actor_is_alive() {
         Some(OutcomeBannerModel {
-            label: "LOSS".to_owned(),
-            detail: "The player has been reduced to 0 HP.".to_owned(),
-            followup: None,
+            label: "INCAPACITATED".to_owned(),
+            detail: "The controlled actor is at 0 HP and cannot act normally.".to_owned(),
+            followup: Some(
+                "Wait to advance the world. Revival, if it occurs, must come from an independent world action."
+                    .to_owned(),
+            ),
         })
     } else if run.active_objective.completed {
         Some(OutcomeBannerModel {
@@ -361,6 +395,7 @@ pub fn build_character_summary(
     run: &RunState,
     bundle: Option<&DatapackBundle>,
 ) -> CharacterSummaryModel {
+    let (hp, max_hp) = run.controlled_actor_health();
     let current_location_name = bundle.and_then(|bundle| {
         bundle
             .locations
@@ -381,8 +416,8 @@ pub fn build_character_summary(
     CharacterSummaryModel {
         datapack_id: run.datapack_id.clone(),
         run_phase: run_phase_label(run).to_owned(),
-        hp: run.hp,
-        max_hp: run.max_hp,
+        hp,
+        max_hp,
         noise_level: run.noise_level,
         noise_label: noise_label(run.noise_level).to_owned(),
         current_location_id: run.current_location_id.clone(),
@@ -422,7 +457,9 @@ pub fn build_character_summary(
         rolling_summary: run.rolling_summary.clone(),
         pack_folder: bundle.map(|bundle| bundle.folder_name.clone()),
         objective_tags,
-        equipped_item_id: run.equipped_item_id.clone(),
+        equipped_item_id: run
+            .equipped_item_id_for_owner(&run.controlled_inventory_owner())
+            .map(ToOwned::to_owned),
     }
 }
 
@@ -570,13 +607,14 @@ pub fn build_game_sidebar(run: &RunState, bundle: &DatapackBundle) -> Option<Gam
     })
 }
 
-pub fn build_game_action_bar(
+pub fn build_game_action_bar_with_focus(
     run: Option<&RunState>,
     bundle: Option<&DatapackBundle>,
+    focused_entity_id: Option<&str>,
 ) -> GameActionBarModel {
     let primary_actions = run
         .zip(bundle)
-        .map(|(run, bundle)| contextual_primary_actions(run, bundle))
+        .map(|(run, bundle)| contextual_primary_actions(run, bundle, focused_entity_id))
         .unwrap_or_else(|| {
             vec![
                 ActionButtonModel {
@@ -592,6 +630,7 @@ pub fn build_game_action_bar(
 
     let quick_exits = run
         .zip(bundle)
+        .filter(|(run, _)| run.controlled_actor_is_alive())
         .and_then(|(run, bundle)| build_game_sidebar(run, bundle))
         .map(|sidebar| sidebar.connected_exits)
         .unwrap_or_default();
@@ -625,6 +664,13 @@ pub fn build_local_item_action_rows(
         .into_iter()
         .flatten()
         .filter_map(|item_id| {
+            if let Some(item) = run.world_item_instances.get(item_id) {
+                return Some(LocalItemActionRowModel {
+                    item_name: item.name.clone(),
+                    inspect_command: format!("inspect {}", item.instance_id),
+                    take_command: format!("take {}", item.instance_id),
+                });
+            }
             bundle
                 .items
                 .iter()
@@ -651,12 +697,20 @@ pub fn build_inventory_action_rows(
             } else {
                 row.item_name.clone()
             },
-            description_line: format!("{} | damage {}", row.description, row.damage),
+            description_line: if row.is_inventory_endpoint {
+                format!(
+                    "{} | damage {} | container: {} item(s)",
+                    row.description, row.damage, row.contained_item_count
+                )
+            } else {
+                format!("{} | damage {}", row.description, row.damage)
+            },
             inspect_command: format!("inspect {}", row.item_id),
             equip_command: (!row.equipped).then(|| format!("equip {}", row.item_id)),
             use_command: format!("use {}", row.item_id),
             show_view_button: true,
-            template_warning: (!row.has_template).then(|| {
+            actor_contract_line: row.actor_contract_line,
+            template_warning: (!row.has_template && !row.is_runtime_admission).then(|| {
                 "Warning: template backing for this item could not be resolved.".to_owned()
             }),
         })
@@ -720,6 +774,24 @@ pub fn build_diagnostics_summary(report: &DiagnosticReport) -> DiagnosticsSummar
                 if run.objective_complete { "yes" } else { "no" }
             ),
             format!("Inventory items: {}", run.inventory_items),
+            format!(
+                "Status effects: {} active | {} consumed",
+                run.active_status_effects, run.consumed_status_effects
+            ),
+            format!("Active NPCs: {}", run.active_npcs),
+            format!(
+                "Additional active objectives: {}",
+                run.additional_active_objectives
+            ),
+            format!("Active temporary exits: {}", run.active_temporary_exits),
+            format!(
+                "Player media this run: {}",
+                if run.player_media_enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            ),
             format!("Known locations: {}", run.known_locations),
             format!(
                 "Live threats: {} enemies | {} bosses",
@@ -1738,12 +1810,31 @@ fn noise_hint_line(level: i32) -> &'static str {
     }
 }
 
-fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<ActionButtonModel> {
+fn contextual_primary_actions(
+    run: &RunState,
+    bundle: &DatapackBundle,
+    focused_entity_id: Option<&str>,
+) -> Vec<ActionButtonModel> {
+    if !run.controlled_actor_is_alive() {
+        return vec![ActionButtonModel {
+            label: "Wait".to_owned(),
+            command: "wait".to_owned(),
+        }];
+    }
+
     let mut actions = Vec::new();
     push_action(&mut actions, "Look", "look");
     if run.active_objective.completed {
         push_action(&mut actions, "Help", "help");
         return actions;
+    }
+
+    let focused_actor = focused_entity_id.and_then(|id| focused_runtime_actor(run, id));
+    let focused_attackable = focused_actor
+        .as_ref()
+        .is_some_and(|actor| actor_is_attackable_by_controlled(run, actor));
+    if let Some(actor) = focused_actor.as_ref() {
+        append_focused_actor_actions(&mut actions, run, bundle, actor);
     }
 
     if let Some(location) = bundle
@@ -1764,7 +1855,7 @@ fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<Ac
             .flatten()
             .any(|boss_id| run.bosses_alive.contains(boss_id));
 
-        if has_live_enemy || has_live_boss {
+        if (has_live_enemy || has_live_boss) && !focused_attackable {
             push_action(&mut actions, "Attack", "attack");
         }
 
@@ -1773,7 +1864,10 @@ fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<Ac
             && location
                 .barricade_item_id
                 .as_deref()
-                .is_some_and(|item_id| run.inventory.iter().any(|item| item.id == item_id))
+                .is_some_and(|item_id| {
+                    run.controlled_inventory()
+                        .is_some_and(|inventory| inventory.iter().any(|item| item.id == item_id))
+                })
         {
             push_action(
                 &mut actions,
@@ -1802,10 +1896,10 @@ fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<Ac
             };
 
             if run.locked_locations.contains(&target.id)
-                && target
-                    .unlock_item_id
-                    .as_deref()
-                    .is_some_and(|item_id| run.inventory.iter().any(|item| item.id == item_id))
+                && target.unlock_item_id.as_deref().is_some_and(|item_id| {
+                    run.controlled_inventory()
+                        .is_some_and(|inventory| inventory.iter().any(|item| item.id == item_id))
+                })
             {
                 push_action(
                     &mut actions,
@@ -1829,7 +1923,158 @@ fn contextual_primary_actions(run: &RunState, bundle: &DatapackBundle) -> Vec<Ac
     actions
 }
 
+fn focused_runtime_actor(run: &RunState, focused_entity_id: &str) -> Option<RuntimeActorView> {
+    run.runtime_actor(focused_entity_id).or_else(|| {
+        run.runtime_actor_ids_at(&run.current_location_id)
+            .into_iter()
+            .filter_map(|actor_id| run.runtime_actor(&actor_id))
+            .find(|actor| {
+                actor.entity_id == focused_entity_id
+                    || run
+                        .enemy_instances
+                        .get(&actor.entity_id)
+                        .is_some_and(|encounter| encounter.instance_id == focused_entity_id)
+                    || run
+                        .boss_instances
+                        .get(&actor.entity_id)
+                        .is_some_and(|encounter| encounter.instance_id == focused_entity_id)
+            })
+    })
+}
+
+fn append_focused_actor_actions(
+    actions: &mut Vec<ActionButtonModel>,
+    run: &RunState,
+    bundle: &DatapackBundle,
+    actor: &RuntimeActorView,
+) {
+    let target_name = actor.name.as_str();
+    push_action(
+        actions,
+        &format!("Inspect {target_name}"),
+        &format!("inspect {target_name}"),
+    );
+
+    if actor_is_attackable_by_controlled(run, actor) {
+        push_action(
+            actions,
+            &format!("Attack {target_name}"),
+            &format!("attack {target_name}"),
+        );
+    }
+
+    // The quick action bar is a short list of immediate, sensible choices, not a
+    // catalogue of every parser verb. A hostile threat is a combat concern;
+    // helping a present neutral/friendly actor is the one broadly meaningful
+    // social action with an existing host-backed outcome.
+    if actor.disposition != ActorDisposition::Hostile {
+        push_action(
+            actions,
+            &format!("Help {target_name}"),
+            &format!("help {target_name}"),
+        );
+    }
+
+    for grant in run.ability_grants.iter().filter(|grant| {
+        crate::game::ability_grant_is_usable_by(run, bundle, grant, &run.player_entity_id)
+    }) {
+        let Some(template) = bundle
+            .abilities
+            .iter()
+            .find(|template| template.id == grant.template_id)
+        else {
+            continue;
+        };
+        let Some(effect) = &template.effect else {
+            continue;
+        };
+        let target_is_valid = match effect {
+            AbilityEffect::Damage { .. } => {
+                actor.disposition == ActorDisposition::Hostile && actor.actor.is_combatant()
+            }
+            AbilityEffect::Healing {
+                required_target_tags,
+                ..
+            } => {
+                actor
+                    .tags
+                    .iter()
+                    .any(|tag| tag.eq_ignore_ascii_case("alive"))
+                    && actor_has_required_tags(actor, required_target_tags)
+            }
+            AbilityEffect::Revive {
+                required_target_tags,
+                ..
+            } => {
+                actor
+                    .tags
+                    .iter()
+                    .any(|tag| tag.eq_ignore_ascii_case("dead"))
+                    && actor_has_required_tags(actor, required_target_tags)
+            }
+            AbilityEffect::Move
+            | AbilityEffect::RevealConnections
+            | AbilityEffect::Status { .. } => false,
+        };
+        if target_is_valid {
+            push_action(
+                actions,
+                &format!("Cast {} at {target_name}", template.name),
+                &format!("cast {} at {target_name}", template.name),
+            );
+        }
+    }
+
+    let owner = crate::game::state::ItemOwner::Entity(actor.entity_id.clone());
+    if actor.disposition == ActorDisposition::Hostile
+        || !run.accepts_item_transfer(&owner)
+        || !run.controlled_actor_can_carry_inventory()
+    {
+        return;
+    }
+
+    if let Some(inventory) = run.controlled_inventory() {
+        for item in inventory {
+            push_action(
+                actions,
+                &format!("Give {} to {target_name}", item.name),
+                &format!("give {} to {target_name}", item.id),
+            );
+        }
+    }
+    if let Some(inventory) = run.entity_inventory(&owner) {
+        for item in inventory {
+            push_action(
+                actions,
+                &format!("Ask {target_name} for {}", item.name),
+                &format!("{target_name}, give me {}", item.id),
+            );
+        }
+    }
+}
+
+fn actor_is_attackable_by_controlled(run: &RunState, actor: &RuntimeActorView) -> bool {
+    actor.disposition == ActorDisposition::Hostile
+        && actor.actor.is_combatant()
+        && run
+            .runtime_actor(&run.player_entity_id)
+            .is_some_and(|player| player.actor.is_combatant())
+}
+
+fn actor_has_required_tags(actor: &RuntimeActorView, required_tags: &[String]) -> bool {
+    required_tags.iter().all(|required| {
+        actor
+            .tags
+            .iter()
+            .any(|actual| actual.eq_ignore_ascii_case(required))
+    })
+}
+
 fn recommended_command(run: &RunState, bundle: &DatapackBundle) -> String {
+    if !run.controlled_actor_is_alive() {
+        return "wait".to_owned();
+    }
+
     if run.active_objective.completed {
         return "look".to_owned();
     }
@@ -1864,7 +2109,10 @@ fn recommended_command(run: &RunState, bundle: &DatapackBundle) -> String {
         && location
             .barricade_item_id
             .as_deref()
-            .is_some_and(|item_id| run.inventory.iter().any(|item| item.id == item_id))
+            .is_some_and(|item_id| {
+                run.controlled_inventory()
+                    .is_some_and(|inventory| inventory.iter().any(|item| item.id == item_id))
+            })
     {
         return format!("barricade {}", location.id);
     }
@@ -1886,7 +2134,9 @@ fn recommended_command(run: &RunState, bundle: &DatapackBundle) -> String {
             .find(|candidate| candidate.id == *connection_id)?;
         let unlock_item_id = target.unlock_item_id.as_deref()?;
         if run.locked_locations.contains(&target.id)
-            && run.inventory.iter().any(|item| item.id == unlock_item_id)
+            && run
+                .controlled_inventory()
+                .is_some_and(|inventory| inventory.iter().any(|item| item.id == unlock_item_id))
         {
             Some(target.id.clone())
         } else {
@@ -1938,11 +2188,11 @@ fn push_action(actions: &mut Vec<ActionButtonModel>, label: &str, command: &str)
 
 #[cfg(test)]
 mod tests {
-    use crate::data::datapacks::load_datapack_bundle_by_folder;
+    use crate::data::datapacks::{AbilityEffect, load_datapack_bundle_by_folder};
     use crate::game::generation::generate_new_run;
 
     use super::{
-        build_character_summary, build_diagnostics_summary, build_game_action_bar,
+        build_character_summary, build_diagnostics_summary, build_game_action_bar_with_focus,
         build_game_header_chips, build_game_sidebar, build_outcome_banner,
     };
 
@@ -1955,7 +2205,7 @@ mod tests {
         run.known_locations.insert("kitchen".to_owned());
         run.visited_locations.insert("kitchen".to_owned());
 
-        let action_bar = build_game_action_bar(Some(&run), Some(&bundle));
+        let action_bar = build_game_action_bar_with_focus(Some(&run), Some(&bundle), None);
 
         assert_eq!(action_bar.command_hint, "Try: take medkit");
         assert!(
@@ -1967,19 +2217,102 @@ mod tests {
     }
 
     #[test]
+    fn action_bar_limits_an_incapacitated_controller_to_wait() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let mut run = generate_new_run(&bundle).state;
+        run.hp = 0;
+
+        let action_bar = build_game_action_bar_with_focus(Some(&run), Some(&bundle), None);
+
+        assert_eq!(action_bar.command_hint, "Try: wait");
+        assert_eq!(action_bar.primary_actions.len(), 1);
+        assert_eq!(action_bar.primary_actions[0].command, "wait");
+        assert!(action_bar.quick_exits.is_empty());
+    }
+
+    #[test]
+    fn focused_hostile_surfaces_targeted_host_valid_actions() {
+        let bundle = load_datapack_bundle_by_folder("property_siege_classic")
+            .expect("expected property_siege_classic bundle to load");
+        let run = generate_new_run(&bundle).state;
+        let enemy_id = run.location_enemies[&run.current_location_id][0].clone();
+        let focus_id = run.enemy_instances[&enemy_id].instance_id.clone();
+        let enemy_name = run.enemy_instances[&enemy_id].name.clone();
+
+        let action_bar =
+            build_game_action_bar_with_focus(Some(&run), Some(&bundle), Some(&focus_id));
+
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == format!("inspect {enemy_name}"))
+        );
+        assert!(
+            action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == format!("attack {enemy_name}"))
+        );
+        for social_command in ["help", "insult", "threaten", "betray"] {
+            assert!(
+                !action_bar
+                    .primary_actions
+                    .iter()
+                    .any(|action| action.command == format!("{social_command} {enemy_name}")),
+                "hostile targets should not surface a {social_command} button"
+            );
+        }
+        assert!(
+            !action_bar
+                .primary_actions
+                .iter()
+                .any(|action| action.command == "attack"),
+            "a direct focused attack makes the ambiguous generic attack redundant"
+        );
+        let damage_ability = run
+            .ability_grants
+            .iter()
+            .filter_map(|grant| {
+                bundle
+                    .abilities
+                    .iter()
+                    .find(|template| template.id == grant.template_id)
+            })
+            .find(|template| matches!(template.effect, Some(AbilityEffect::Damage { .. })))
+            .expect("starter fixture should provide a damage ability");
+        assert!(action_bar.primary_actions.iter().any(|action| {
+            action.command == format!("cast {} at {enemy_name}", damage_ability.name)
+        }));
+    }
+
+    #[test]
     fn action_bar_surfaces_unlock_when_player_has_keys() {
         let bundle = load_datapack_bundle_by_folder("property_siege_classic")
             .expect("expected property_siege_classic bundle to load");
         let mut run = generate_new_run(&bundle).state;
         run.inventory.push(crate::game::state::InventoryEntry {
             id: "house_keys".to_owned(),
+            instance_id: "test_house_keys".to_owned(),
+            template_id: "house_keys".to_owned(),
+            bucket: crate::game::state::ItemBucket::Inventory,
+            location_id: None,
+            lifecycle: crate::game::state::InstanceLifecycle::Active,
             name: "House Keys".to_owned(),
             description: "test".to_owned(),
             damage: 0,
+            origin: crate::game::state::ItemOrigin::Authored,
+            condition: None,
+            tags: Vec::new(),
+            actor: None,
+            disposition: crate::game::ActorDisposition::Neutral,
+            inventory: Vec::new(),
+            equipped_item_id: None,
         });
 
         let sidebar = build_game_sidebar(&run, &bundle).expect("sidebar should build");
-        let action_bar = build_game_action_bar(Some(&run), Some(&bundle));
+        let action_bar = build_game_action_bar_with_focus(Some(&run), Some(&bundle), None);
 
         assert_eq!(
             sidebar.suggested_command_line,
@@ -2062,15 +2395,27 @@ mod tests {
         let mut run = generate_new_run(&bundle).state;
         run.inventory.push(crate::game::state::InventoryEntry {
             id: "barricade_kit".to_owned(),
+            instance_id: "test_barricade_kit".to_owned(),
+            template_id: "barricade_kit".to_owned(),
+            bucket: crate::game::state::ItemBucket::Inventory,
+            location_id: None,
+            lifecycle: crate::game::state::InstanceLifecycle::Active,
             name: "Barricade Kit".to_owned(),
             description: "test".to_owned(),
             damage: 0,
+            origin: crate::game::state::ItemOrigin::Authored,
+            condition: None,
+            tags: Vec::new(),
+            actor: None,
+            disposition: crate::game::ActorDisposition::Neutral,
+            inventory: Vec::new(),
+            equipped_item_id: None,
         });
         run.barricaded_locations.insert("front_verandah".to_owned());
         let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
         run.enemies_alive.insert(enemy_id.clone());
         run.enemy_hp.insert(enemy_id.clone(), 3);
-        run.spawned_enemy_targets
+        run.actor_noise_targets
             .insert(enemy_id, "garage".to_owned());
 
         let summary = build_character_summary(&run, Some(&bundle));
@@ -2165,7 +2510,7 @@ mod tests {
         let enemy_id = "noise_spawn_1_shambler_front_gate".to_owned();
         run.enemies_alive.insert(enemy_id.clone());
         run.enemy_hp.insert(enemy_id.clone(), 3);
-        run.spawned_enemy_targets
+        run.actor_noise_targets
             .insert(enemy_id.clone(), "garage".to_owned());
         run.location_enemies
             .entry("front_verandah".to_owned())
@@ -2191,7 +2536,7 @@ mod tests {
         run.current_location_id = "garage".to_owned();
         run.locked_locations.remove("garage");
 
-        let action_bar = build_game_action_bar(Some(&run), Some(&bundle));
+        let action_bar = build_game_action_bar_with_focus(Some(&run), Some(&bundle), None);
 
         assert_eq!(action_bar.command_hint, "Try: look");
         assert!(
@@ -2325,6 +2670,9 @@ mod tests {
             active_cues: Vec::new(),
             encounter_snapshot: Vec::new(),
             future_hook_keys: vec!["epilogue_hook:garage".to_owned()],
+            observed_entity_rows: Vec::new(),
+            observed_entities: Vec::new(),
+            focused_entity_id: None,
         };
 
         let display = super::build_media_panel_display(&media_panel);

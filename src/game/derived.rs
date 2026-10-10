@@ -1,6 +1,7 @@
 use crate::data::datapacks::{BossTemplate, DatapackBundle};
 
 use super::RunState;
+use super::spawned_ai::autonomous_actor_ids;
 
 #[derive(Clone, Copy)]
 pub enum ObjectiveConditionRowStyle {
@@ -9,8 +10,8 @@ pub enum ObjectiveConditionRowStyle {
 }
 
 pub fn run_phase_label(run: &RunState) -> &'static str {
-    if run.hp <= 0 {
-        "Loss"
+    if !run.controlled_actor_is_alive() {
+        "Incapacitated"
     } else if run.active_objective.completed {
         "Epilogue"
     } else {
@@ -40,9 +41,8 @@ pub fn objective_condition_rows(
 
     if let Some(required_item_id) = &run.active_objective.required_item_id {
         let held = run
-            .inventory
-            .iter()
-            .any(|item| &item.id == required_item_id);
+            .controlled_inventory()
+            .is_some_and(|inventory| inventory.iter().any(|item| &item.id == required_item_id));
         rows.push(match style {
             ObjectiveConditionRowStyle::Requirement => format!(
                 "Requires item '{}': {}",
@@ -106,7 +106,7 @@ pub fn utility_relevance_rows(run: &RunState, bundle: Option<&DatapackBundle>) -
     };
 
     let mut rows = Vec::new();
-    for inventory_item in &run.inventory {
+    for inventory_item in run.controlled_inventory().into_iter().flatten() {
         let Some(template) = bundle
             .items
             .iter()
@@ -223,45 +223,46 @@ pub fn security_summary_rows(run: &RunState, bundle: Option<&DatapackBundle>) ->
 }
 
 pub fn attractor_summary_rows(run: &RunState, bundle: Option<&DatapackBundle>) -> Vec<String> {
-    let mut enemy_ids = run
-        .enemies_alive
-        .iter()
-        .filter(|enemy_id| enemy_id.starts_with("noise_spawn_"))
-        .cloned()
-        .collect::<Vec<_>>();
-    enemy_ids.sort();
-
-    enemy_ids
+    let actor_ids = autonomous_actor_ids(run)
         .into_iter()
-        .map(|enemy_id| {
-            let enemy_label = enemy_label(bundle, &enemy_id);
-            if let Some(location_id) = run.spawned_enemy_sight_targets.get(&enemy_id) {
+        .filter(|actor_id| {
+            run.actor_sight_targets.contains_key(actor_id)
+                || run.actor_noise_targets.contains_key(actor_id)
+                || run.actor_searching.contains(actor_id)
+        })
+        .collect::<Vec<_>>();
+
+    actor_ids
+        .into_iter()
+        .map(|actor_id| {
+            let actor_label = actor_label(run, bundle, &actor_id);
+            if let Some(location_id) = run.actor_sight_targets.get(&actor_id) {
                 let subject = run
-                    .spawned_enemy_sight_subjects
-                    .get(&enemy_id)
-                    .map(|subject_id| subject_label(bundle, subject_id))
+                    .actor_sight_subjects
+                    .get(&actor_id)
+                    .map(|subject_id| subject_label(run, bundle, subject_id))
                     .unwrap_or_else(|| "unknown subject".to_owned());
                 format!(
                     "Attractor: {} tracking by sight toward {} at {}.",
-                    enemy_label,
+                    actor_label,
                     subject,
                     location_label(bundle, location_id)
                 )
-            } else if run.spawned_enemy_searching.contains(&enemy_id) {
+            } else if run.actor_searching.contains(&actor_id) {
                 let origin = run
-                    .spawned_enemy_origins
-                    .get(&enemy_id)
+                    .actor_origins
+                    .get(&actor_id)
                     .map(|location_id| location_label(bundle, location_id))
                     .unwrap_or_else(|| "unknown origin".to_owned());
-                format!("Attractor: {} searching; origin {}.", enemy_label, origin)
-            } else if let Some(location_id) = run.spawned_enemy_targets.get(&enemy_id) {
+                format!("Attractor: {} searching; origin {}.", actor_label, origin)
+            } else if let Some(location_id) = run.actor_noise_targets.get(&actor_id) {
                 format!(
                     "Attractor: {} tracking noise toward {}.",
-                    enemy_label,
+                    actor_label,
                     location_label(bundle, location_id)
                 )
             } else {
-                format!("Attractor: {} has no active attractor.", enemy_label)
+                format!("Attractor: {} has no active attractor.", actor_label)
             }
         })
         .collect()
@@ -316,11 +317,16 @@ fn enemy_label(bundle: Option<&DatapackBundle>, enemy_id: &str) -> String {
         .unwrap_or_else(|| enemy_id.to_owned())
 }
 
-fn subject_label(bundle: Option<&DatapackBundle>, subject_id: &str) -> String {
-    if subject_id == "player" {
-        return "player".to_owned();
-    }
-    enemy_label(bundle, subject_id)
+fn actor_label(run: &RunState, bundle: Option<&DatapackBundle>, actor_id: &str) -> String {
+    run.runtime_actor(actor_id)
+        .map(|actor| format!("{} ({})", actor.name, actor_id))
+        .unwrap_or_else(|| enemy_label(bundle, actor_id))
+}
+
+fn subject_label(run: &RunState, bundle: Option<&DatapackBundle>, subject_id: &str) -> String {
+    run.runtime_actor(subject_id)
+        .map(|actor| actor.name)
+        .unwrap_or_else(|| enemy_label(bundle, subject_id))
 }
 
 fn location_label(bundle: Option<&DatapackBundle>, location_id: &str) -> String {

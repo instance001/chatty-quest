@@ -1,10 +1,13 @@
 mod app;
 mod app_paths;
+mod collection;
 mod data;
 mod diagnostics;
 mod game;
 mod handoff;
 mod media;
+#[allow(dead_code)]
+mod media_pool;
 mod runtime;
 mod session;
 mod ui;

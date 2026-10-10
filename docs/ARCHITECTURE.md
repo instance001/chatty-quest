@@ -16,6 +16,66 @@ Useful shorthand:
 - narration is the accent
 - media is the illustration
 
+## Current Implemented Substrate
+
+The current branch has moved beyond the historical `v0.1` proof slice. The following are active
+engine contracts, not future aspirations.
+
+### Capability-Gated Mechanical Contracts
+
+Capabilities are roots of schema subtrees. A capability's registry entry defines or points to its
+dependent fields, defaults, prerequisites, validation, and runtime requirements. That one source
+drives authored validation, bounded proposal forms, approval UI, runtime mutation validation, and
+persistence.
+
+For example, `combat` makes combat fields such as damage applicable, while `inventory` makes an
+entity a valid ownership endpoint. A disabled capability makes its dependent data inapplicable and
+its mechanics unavailable. Entity nouns do not own mechanics: an NPC, item, player, boss, or
+future summon uses the same contract whenever it has the relevant capability.
+
+### Generic Actors And Control
+
+The player is a runtime entity selected by `player_entity_id`; it is not a special combat or
+inventory implementation. The currently controlled entity is the origin of player-driven actions.
+Actors use shared host actions for movement, combat, perception, inventory, abilities, and timing.
+Changing control changes who is attempting an action, never which reducer system makes it true.
+
+The parser can preserve a target request such as `attack <target>`, but it does not choose a
+controller or decide success. The reducer resolves the current controlled actor, validates its
+capabilities and the target's state, then commits or rejects the action.
+
+### Events, Projection, And Presentation
+
+Each committed mechanic emits `GameEvent` truth. The event projection layer derives one generic
+downstream representation:
+
+```text
+type | origin | impact | outcome
+```
+
+Action traces, narration context, diagnostics, media focus, summaries, and epilogue routing use
+that projection. A downstream consumer should ask what happened, not hand-maintain a separate
+interpretation of every event variant. Presentation may decorate a reducer-confirmed event but
+may never claim a mutation that was not committed.
+
+### Ownership And Abilities
+
+`TransferItem { item_id, origin, destination }` is the sole authoritative ownership mutation.
+Location pickup, drop, give, return, theft, equip, and unequip resolve into it and emit an
+`ItemTransferred` event. Equipment is a derived relationship over canonical ownership.
+
+Ability templates are immutable content. An `AbilityGrant` is a distinct owned runtime copy with
+its own charges, expiry, cooldown, source, and owner. The same template can therefore be
+permanent knowledge, a one-use scroll, a charged staff effect, or temporary access without shared
+mutable charges. See [ABILITY_GRANTS_SPEC.md](ABILITY_GRANTS_SPEC.md).
+
+### Media
+
+Media resolves from reducer-confirmed semantic roles through a hierarchy of exact template asset,
+template-preferred pool or tag, family pool, category pool, and global fallback. The resolution is
+deterministic when the run needs it, varies within eligible pools, and visibly identifies its
+chosen asset and source. Media is strictly non-authoritative.
+
 ## Engine Core
 
 The engine core is the deterministic heart of the project.
@@ -110,14 +170,16 @@ Its responsibilities include:
 - rejecting invalid transitions
 - producing structured outcomes
 
-Example deterministic actions for `v0.1`:
+Current deterministic action families include:
 
 - move
 - inspect
 - take item
 - use item
 - equip item
-- attack
+- transfer item
+- attack a resolved target
+- cast, learn, grant, and progress an ability through host-owned contracts
 - wait
 - save
 - load
@@ -130,7 +192,8 @@ If a fact affects mechanics later, it should be promoted into reducer-visible st
 
 The narrator is a replaceable presentation layer that turns structured outcomes into player-facing prose.
 
-For `v0.1`, this is a `MockNarrator`.
+The active runtime supports Mock, local GGUF, and configured hosted narrator adapters. All remain
+presentation adapters; none receive mutation authority.
 
 The narrator may:
 
@@ -213,9 +276,9 @@ That model emphasizes:
 - a chat-first `Game` tab with side panels
 - clean expansion through new tabs instead of permanent clutter
 
-## Future Adapter Seams
+## Adapter Seams
 
-The project should reserve future seams without activating them in `v0.1`.
+The project keeps external adapters separate from the deterministic substrate.
 
 Likely future seams include:
 
@@ -224,7 +287,8 @@ Likely future seams include:
 - handoff lanes for Chatty-Art asset requests
 - handoff lanes for Chatty-Lora style consistency metadata
 
-In `v0.1`, these seams should remain visible but dormant.
+Live narrator adapters are active. Handoff, external asset-generation, and model-training lanes
+remain optional integrations rather than runtime authorities.
 
 Likewise, future NPC memory systems, dynamic rewards, and richer media overrides should be designed as extensions of the same template/bucket/reducer spine, not as parallel improvisational subsystems.
 

@@ -24,6 +24,7 @@ pub(super) fn apply_epilogue_action(
         },
         GameAction::Look => ActionOutcome {
             events: vec![GameEvent::LocationLooked {
+                origin_id: state.player_entity_id.clone(),
                 location_id: state.current_location_id.clone(),
             }],
             lines: describe_current_location(state, bundle),
@@ -31,8 +32,27 @@ pub(super) fn apply_epilogue_action(
         GameAction::Move { destination } => handle_move(state, bundle, &destination),
         GameAction::Inspect { target } => handle_inspect(state, bundle, &target),
         GameAction::Equip { item_name } => handle_equip(state, &item_name),
-        GameAction::Attack => epilogue_rejection(
+        GameAction::Attack | GameAction::AttackTarget { .. } => epilogue_rejection(
             "The run is already won. There is nothing left here that needs killing.",
+        ),
+        GameAction::ActorAttack { .. } => epilogue_rejection(
+            "The run is already won. Actor combat is paused for the epilogue pass.",
+        ),
+        GameAction::ActorMove { .. } => epilogue_rejection(
+            "The run is already won. Autonomous actor movement is paused for the epilogue pass.",
+        ),
+        GameAction::TransferItem { .. } => epilogue_rejection(
+            "The run is already won. Ownership changes are paused for the epilogue pass.",
+        ),
+        GameAction::ApplySocialEvent { .. } => epilogue_rejection(
+            "The run is already won. Relationship changes are paused for the epilogue pass.",
+        ),
+        GameAction::UseAbility { .. }
+        | GameAction::UnlockAbility { .. }
+        | GameAction::GrantAbility { .. }
+        | GameAction::LearnAbilityFromItem { .. }
+        | GameAction::AwardProgress { .. } => epilogue_rejection(
+            "The run is already won. Ability and progression changes are paused for the epilogue pass.",
         ),
         GameAction::Wait => epilogue_rejection(
             "The run is already won. You can linger, but the siege clock is no longer spending your HP.",
@@ -48,6 +68,15 @@ pub(super) fn apply_epilogue_action(
         ),
         GameAction::Barricade { .. } => epilogue_rejection(
             "The run is already won. Barricade changes are paused for the epilogue pass.",
+        ),
+        GameAction::AdmitNarratorItem { .. }
+        | GameAction::AdmitNarratorStatus { .. }
+        | GameAction::AdmitNarratorNpc { .. }
+        | GameAction::AdmitNarratorEnemy { .. }
+        | GameAction::AdmitNarratorBoss { .. }
+        | GameAction::AdmitNarratorObjective { .. }
+        | GameAction::AdmitNarratorTemporaryExit { .. } => epilogue_rejection(
+            "The run is already won. New narrator additions are paused for the epilogue pass.",
         ),
     }
 }

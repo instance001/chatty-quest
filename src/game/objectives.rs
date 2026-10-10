@@ -6,11 +6,16 @@ pub(super) fn update_objective_completion(state: &mut RunState) -> bool {
         .target_boss_id
         .as_ref()
         .is_none_or(|boss_id| state.bosses_defeated.contains(boss_id));
-    let item_condition_met = state
-        .active_objective
-        .required_item_id
-        .as_ref()
-        .is_none_or(|item_id| state.inventory.iter().any(|item| &item.id == item_id));
+    let item_condition_met =
+        state
+            .active_objective
+            .required_item_id
+            .as_ref()
+            .is_none_or(|item_id| {
+                state
+                    .controlled_inventory()
+                    .is_some_and(|inventory| inventory.iter().any(|item| &item.id == item_id))
+            });
     let location_condition_met = state
         .active_objective
         .required_location_id
@@ -23,6 +28,10 @@ pub(super) fn update_objective_completion(state: &mut RunState) -> bool {
         has_any_condition && boss_condition_met && item_condition_met && location_condition_met;
     let just_completed = completed_now && !state.active_objective.completed;
     state.active_objective.completed = completed_now;
+    if just_completed {
+        state.active_objective.lifecycle = super::state::InstanceLifecycle::Completed;
+        state.active_objective.bucket = super::state::ObjectiveBucket::Completed;
+    }
     just_completed
 }
 
@@ -39,9 +48,8 @@ pub(super) fn objective_condition_statuses(state: &RunState) -> Vec<ObjectiveCon
         statuses.push(ObjectiveConditionStatus {
             label: format!("Hold item '{}'", required_item_id),
             met: state
-                .inventory
-                .iter()
-                .any(|item| &item.id == required_item_id),
+                .controlled_inventory()
+                .is_some_and(|inventory| inventory.iter().any(|item| &item.id == required_item_id)),
         });
     }
 

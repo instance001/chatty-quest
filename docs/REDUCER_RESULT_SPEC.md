@@ -32,7 +32,7 @@ Short rule:
 - reducer result describes truth
 - presentation layers decorate truth
 
-## Current `v0.1` Shape
+## Current Reducer Result Shape
 
 The current implementation uses:
 
@@ -40,7 +40,8 @@ The current implementation uses:
 - `GameEvent`
 - `ActionOutcome { events, lines }`
 
-This is already the correct basic direction.
+The historical `v0.1` envelope established the correct direction. The active implementation adds
+an event projection layer so downstream consumers do not each hand-map every new event variant.
 
 It means:
 
@@ -50,6 +51,36 @@ It means:
 - `lines` are human-facing summary text for immediate display
 
 This spec blesses that direction while defining how it should evolve cleanly.
+
+## Canonical Event Projection
+
+Every emitted `GameEvent` has one host-owned `EventProjection`. Its generic action-facing shape
+is:
+
+```text
+type | origin | impact | outcome
+```
+
+`type` is the stable action/effect family. `origin` identifies the actor or system that caused the
+event. `impact` identifies the target, destination, or affected entity/location. `outcome` is the
+reducer-confirmed result, such as damage, moved, transferred, equipped, rejected, or defeated.
+
+The projection is derived from event truth in one central place. Action traces, narrator context,
+media focus, diagnostics, summaries, epilogue routing, and similar causal consumers should use it
+instead of independently matching on every `GameEvent` variant. Event-specific UI can still read
+its typed payload when it genuinely needs detail; it must not recreate a rival causal mapping.
+
+Examples:
+
+```text
+combat | lira_voss | front_gate_shambler | 5 damage
+transfer | player | lira_voss | rusty_toolbox transferred
+equip | player | battered_cricket_bat | equipped
+```
+
+`ItemTransferred` is the event for every authoritative ownership change. A gift, return, theft,
+pickup, drop, equip, or unequip may have additional semantic consequences, but it must not bypass
+the common transfer event or invent a noun-specific ownership result.
 
 ## Action Input Contract
 
@@ -312,7 +343,7 @@ This matters because downstream systems still need to know:
 
 A rejected action should not quietly disappear just because it caused no canonical mutation.
 
-## Win And Loss Contract
+## Win And Incapacitation Contract
 
 Run completion should always be expressed structurally before it is celebrated stylistically.
 
@@ -320,15 +351,18 @@ Current good direction:
 
 - objective completion emits `ObjectiveCompleted`
 - win emits `RunWon`
-- death emits `RunLost`
-- UI lines can still say `You win.` or `You lose.`
+- objective completion emits `ObjectiveCompleted`, but only while the controlled actor is alive
+- incapacity is the current 0-HP action state, not permanent death or a terminal run result; its effective runtime tags switch from `alive` to `dead`
+- ordinary healing requires the `alive` target tag; a revival effect requires the `dead` target tag plus its own target contract. This establishes revivability without declaring every 0-HP actor permanently dead.
+- an incapacitated controlled actor may only wait. Revival remains an engine-supported possibility for independently scheduled world behavior; player commands cannot issue proxy actions while incapacitated.
+- `RunLost` remains a legacy event shape for old saves and external consumers, not the automatic result of reaching 0 HP
 
 This contract is important because:
 
-- UI banners can trust it
-- save/load can trust terminal state
-- diagnostics can count it
-- future handoff logic can respect it
+- UI banners can explain the controlled actor's current state
+- save/load can preserve reversible incapacity
+- diagnostics and handoff can distinguish incapacity from scenario completion
+- future resurrection and companion systems have one stable target-tag contract
 
 ## Rolling Summary Contract
 
